@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <Company>Selective VPN Router</Company>
+    <Product>Selective VPN Router</Product>
+    <Version>0.2.0</Version>
+  </PropertyGroup>
+</Project>

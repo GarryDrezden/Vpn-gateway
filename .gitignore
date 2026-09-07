@@ -1,0 +1,56 @@
+## Build
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+*.log
+artifacts/
+*.sys
+*.cat
+
+## Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.userosscache
+*.suo
+*.rsuser
+*.userprefs
+
+## NuGet
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+## Local diagnostic output from V0 runs
+reports/
+*.diag.txt
+probe-*.txt
+v0-output*.txt
+
+## VPN profiles and secrets — never commit
+*.ovpn
+*.ovpn.bak
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.p7b
+*.p7c
+*.pkcs12
+auth.txt
+auth.cfg
+credentials.txt
+*.login
+*.secret
+*.passwd
+*.password

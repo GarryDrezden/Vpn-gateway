@@ -1,0 +1,123 @@
+<Window x:Class="SelectiveVpnRouter.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Selective VPN Router"
+        Height="720" Width="1100"
+        Closing="OnClosing">
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Background="#1F2937" Padding="12">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel>
+          <TextBlock Text="Selective VPN Router" Foreground="White" FontSize="20" FontWeight="Bold"/>
+          <TextBlock x:Name="StatusLine" Foreground="#D1D5DB" Text="Service: checking…"/>
+          <TextBlock x:Name="IfaceLine" Foreground="#9CA3AF" Text="Direct: —    VPN: —"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button Content="Start VPN" Click="OnStart"/>
+          <Button Content="Stop VPN" Click="OnStop"/>
+          <Button Content="Pause routing" Click="OnPause"/>
+          <Button Content="EMERGENCY RESTORE" Click="OnEmergency" Background="#7F1D1D" Foreground="White"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+    <TabControl>
+      <TabItem Header="Routing rules">
+        <DockPanel Margin="8">
+          <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8"
+                     Text="Application rules are per-executable (the process that opens the TCP socket). Domain/IP/CIDR rules apply to ALL processes connecting to those destinations."/>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal">
+            <Button Content="Add application" Click="OnAddApp"/>
+            <Button Content="Add domain" Click="OnAddDomain"/>
+            <Button Content="Add IP/CIDR" Click="OnAddCidr"/>
+            <Button Content="Remove selected" Click="OnRemoveRule"/>
+            <Button Content="Save rules" Click="OnSaveRules"/>
+          </StackPanel>
+          <DataGrid x:Name="RulesGrid" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="False">
+            <DataGrid.Columns>
+              <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+              <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="110" IsReadOnly="True"/>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="140"/>
+              <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="*"/>
+              <DataGridTextColumn Header="Route" Binding="{Binding Mode}" Width="80"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </DockPanel>
+      </TabItem>
+      <TabItem Header="Live connections">
+        <DockPanel Margin="8">
+          <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,8"
+                     Text="Metadata only. No payload is logged. Process is the executable that created the TCP flow (git.exe launched by Cursor stays git.exe)."/>
+          <DataGrid x:Name="FlowsGrid" AutoGenerateColumns="True" IsReadOnly="True"/>
+        </DockPanel>
+      </TabItem>
+      <TabItem Header="Test Center">
+        <DockPanel Margin="8">
+          <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap"
+                     Text="Run these without waiting for a developer. PASS/FAIL/WARNING. Real Cursor/git/dual-VPN checks are in docs/MANUAL_TEST_PLAN.md."/>
+          <ListBox x:Name="DiagResults" DockPanel.Dock="Bottom" Height="260"/>
+          <WrapPanel Margin="0,8">
+            <Button Content="Check administrator privileges" Click="OnDiag" Tag="admin"/>
+            <Button Content="Detect internet interfaces" Click="OnDiag" Tag="direct-if"/>
+            <Button Content="Detect VPN interfaces" Click="OnDiag" Tag="vpn-if"/>
+            <Button Content="Check OpenVPN executable" Click="OnDiag" Tag="openvpn-exe"/>
+            <Button Content="Validate OVPN profile" Click="OnDiag" Tag="ovpn-profile"/>
+            <Button Content="Connect VPN" Click="OnDiag" Tag="connect-vpn"/>
+            <Button Content="Test direct route" Click="OnDiag" Tag="direct-route"/>
+            <Button Content="Test VPN-bound socket" Click="OnDiag" Tag="vpn-bound-socket"/>
+            <Button Content="Test application routing" Click="OnDiag" Tag="app-routing"/>
+            <Button Content="Test DNS" Click="OnDiag" Tag="dns"/>
+            <Button Content="Test IPv4" Click="OnDiag" Tag="ipv4"/>
+            <Button Content="Test IPv6" Click="OnDiag" Tag="ipv6"/>
+            <Button Content="Test cleanup" Click="OnDiag" Tag="cleanup"/>
+            <Button Content="Export diagnostic report" Click="OnDiag" Tag="export"/>
+          </WrapPanel>
+        </DockPanel>
+      </TabItem>
+      <TabItem Header="Setup wizard">
+        <StackPanel Margin="16" MaxWidth="720" HorizontalAlignment="Left">
+          <TextBlock FontSize="16" FontWeight="Bold" Text="First run"/>
+          <TextBlock TextWrapping="Wrap" Margin="0,8" Text="Selected apps use the personal OpenVPN tunnel. Everything else stays on normal Windows routing. Personal VPN is started with --route-nopull so it does not steal the system default route."/>
+          <TextBlock Text="1. OpenVPN executable"/>
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Browse" Click="OnBrowseExe"/>
+            <TextBox x:Name="ExeBox"/>
+          </DockPanel>
+          <TextBlock Text="2. OpenVPN profile (.ovpn)"/>
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Browse" Click="OnBrowseProfile"/>
+            <TextBox x:Name="ProfileBox"/>
+          </DockPanel>
+          <CheckBox x:Name="DcoBox" Margin="4,8" Content="Compatibility mode (disable DCO) — useful when DCO conflicts with another VPN/network driver. Off by default."/>
+          <TextBlock TextWrapping="Wrap" Margin="4,8" x:Name="Ipv6Help"
+                     Text="IPv6 default: block direct IPv6 for VPN-routed apps when the tunnel has no IPv6, so those apps do not leak around the VPN."/>
+          <ComboBox x:Name="Ipv6Box" Margin="4">
+            <ComboBoxItem Content="Auto (block IPv6 leak if tunnel has no IPv6)"/>
+            <ComboBoxItem Content="VPN if available"/>
+            <ComboBoxItem Content="Block for VPN-routed apps" IsSelected="True"/>
+            <ComboBoxItem Content="Allow direct (unsafe / may leak)"/>
+          </ComboBox>
+          <CheckBox x:Name="QuicBox" Margin="4,8" Content="Block QUIC UDP/443 for VPN-routed apps (optional, off by default; forces TCP fallback). Does not block all UDP."/>
+          <TextBlock Text="3. First application (e.g. Cursor.exe)"/>
+          <DockPanel>
+            <Button DockPanel.Dock="Right" Content="Browse EXE" Click="OnBrowseFirstApp"/>
+            <TextBox x:Name="FirstAppBox"/>
+          </DockPanel>
+          <StackPanel Orientation="Horizontal" Margin="0,12">
+            <Button Content="Save setup" Click="OnSaveSetup"/>
+            <Button Content="Connect and detect tunnel" Click="OnStart"/>
+            <Button Content="Add git.exe DIRECT rule" Click="OnAddGitDirect"/>
+          </StackPanel>
+          <TextBlock x:Name="WizardHint" TextWrapping="Wrap" Margin="0,8"
+                     Text="After connect: add SelectiveVpnRouter.Probe.exe as a VPN application rule, run Probe --http, and confirm Live connections show VPN. A second Probe without a rule should stay DIRECT."/>
+        </StackPanel>
+      </TabItem>
+      <TabItem Header="VPN log">
+        <TextBox x:Name="LogBox" IsReadOnly="True" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
+      </TabItem>
+    </TabControl>
+  </DockPanel>
+</Window>
