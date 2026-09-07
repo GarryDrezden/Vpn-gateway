@@ -84,7 +84,7 @@ public partial class MainWindow : Window
             StatusLine.Text = snap.Vpn.Connected
                 ? $"VPN: Connected    Driver: {(snap.DriverLoaded ? "loaded" : "NOT loaded")}    Redirect: {(snap.TransparentRedirectActive ? "armed" : "inactive")}"
                 : $"VPN: Disconnected    Service: up    Driver: {(snap.DriverLoaded ? "loaded" : "NOT loaded")}";
-            IfaceLine.Text = $"Direct: {snap.DirectAdapter?.Name ?? "—"}    VPN: {snap.VpnAdapter?.Name ?? "—"} if={snap.VpnAdapter?.Ipv4Index?.ToString() ?? "—"}  {string.Join(",", snap.VpnAdapter?.Ipv4 ?? [])}";
+            IfaceLine.Text = $"Direct: {snap.DirectAdapter?.Name ?? "—"}    VPN: {snap.VpnAdapter?.Name ?? "—"} if={snap.VpnAdapter?.Ipv4Index?.ToString() ?? "—"}  preferred default if={snap.PreferredDefault?.InterfaceIndex} metric={snap.PreferredDefault?.Metric}    owned 0/0 metric={snap.OwnedTransportDefault?.Metric.ToString() ?? "—"}";
             FlowsGrid.ItemsSource = snap.Flows;
             LogBox.Text = string.Join(Environment.NewLine, snap.Vpn.RecentLog);
             _tray.Text = snap.Vpn.Connected ? "Selective VPN Router — Connected" : "Selective VPN Router — Disconnected";
@@ -252,6 +252,11 @@ public partial class MainWindow : Window
         }
     }
 
+    private static readonly HashSet<string> ConfirmDiags =
+    [
+        "driver-install", "driver-start", "driver-stop", "driver-uninstall", "kill-service", "cleanup",
+    ];
+
     private async void OnDiag(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string name })
@@ -259,9 +264,24 @@ public partial class MainWindow : Window
             return;
         }
 
+        bool confirm = false;
+        if (ConfirmDiags.Contains(name))
+        {
+            string extra = name == "kill-service"
+                ? "This terminates the elevated service. Direct internet should keep working. Restart the service afterwards. Boot security is not changed."
+                : "This changes driver/service state only. TESTSIGNING, Secure Boot, HVCI, and BitLocker are NOT changed.";
+            if (MessageBox.Show(extra + "\n\nContinue: " + name + "?", "Confirm", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+            {
+                DiagResults.Items.Insert(0, "WARNING  " + name + ": cancelled");
+                return;
+            }
+
+            confirm = true;
+        }
+
         try
         {
-            DiagnosticResult? r = await _client.SendOkAsync<DiagnosticResult>(IpcMethods.RunDiagnostic, new { name }, _cts.Token);
+            DiagnosticResult? r = await _client.SendOkAsync<DiagnosticResult>(IpcMethods.RunDiagnostic, new { name, confirm }, _cts.Token);
             if (r is not null)
             {
                 DiagResults.Items.Insert(0, $"{r.Outcome}  {r.Name}: {r.Message}");

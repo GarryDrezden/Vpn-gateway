@@ -12,5 +12,6 @@
     <ProjectReference Include="..\SelectiveVpnRouter.Core\SelectiveVpnRouter.Core.csproj" />
     <ProjectReference Include="..\SelectiveVpnRouter.Network\SelectiveVpnRouter.Network.csproj" />
     <ProjectReference Include="..\SelectiveVpnRouter.Proxy\SelectiveVpnRouter.Proxy.csproj" />
+    <ProjectReference Include="..\SelectiveVpnRouter.Probe\SelectiveVpnRouter.Probe.csproj" />
   </ItemGroup>
 </Project>

@@ -12,14 +12,40 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
           --http URL
           --dns HOST
           --watch
+          --tcp6 HOST PORT
+          --spawn EXE [args...]
           --via-proxy HOST:PORT
           --bind-if INDEX
           --public-ip [URL]
 
         Add this executable as an Application VPN rule, then --http to verify isolation.
         Without a rule, the same commands should stay DIRECT.
+        --spawn starts another executable (policy follows that child, not this parent).
         """);
     return 0;
+}
+
+if (args.Length >= 2 && args[0] == "--spawn")
+{
+    var psi = new ProcessStartInfo
+    {
+        FileName = args[1],
+        UseShellExecute = false,
+    };
+    for (int i = 2; i < args.Length; i++)
+    {
+        psi.ArgumentList.Add(args[i]);
+    }
+
+    using var child = Process.Start(psi);
+    if (child is null)
+    {
+        Console.WriteLine("spawn FAIL");
+        return 1;
+    }
+
+    await child.WaitForExitAsync();
+    return child.ExitCode;
 }
 
 int? bindIf = null;
@@ -79,6 +105,11 @@ for (int i = 0; i < args.Length; i++)
         await TcpAsync(args[i + 1], int.Parse(args[i + 2]), bindIf, proxy);
     }
 
+    if (args[i] == "--tcp6" && i + 2 < args.Length)
+    {
+        await Tcp6Async(args[i + 1], int.Parse(args[i + 2]));
+    }
+
     if (args[i] == "--http" && i + 1 < args.Length)
     {
         await HttpAsync(args[i + 1], bindIf, proxy);
@@ -94,6 +125,30 @@ for (int i = 0; i < args.Length; i++)
 }
 
 return 0;
+
+static async Task Tcp6Async(string host, int port)
+{
+    var sw = Stopwatch.StartNew();
+    try
+    {
+        IPAddress ip;
+        if (!IPAddress.TryParse(host, out ip!) || ip.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            IPAddress[] addrs = await Dns.GetHostAddressesAsync(host, AddressFamily.InterNetworkV6);
+            ip = addrs[0];
+        }
+
+        using var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+        await socket.ConnectAsync(ip, port, cts.Token);
+        var local = (IPEndPoint)socket.LocalEndPoint!;
+        Console.WriteLine($"tcp6 OK {sw.ElapsedMilliseconds}ms local {local} remote {socket.RemoteEndPoint}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"tcp6 FAIL {sw.ElapsedMilliseconds}ms {ex.GetType().Name}: {ex.Message}");
+    }
+}
 
 static async Task TcpAsync(string host, int port, int? bindIf, string? proxy)
 {

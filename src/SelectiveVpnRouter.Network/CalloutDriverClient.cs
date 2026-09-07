@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using SelectiveVpnRouter.Core;
 
 namespace SelectiveVpnRouter.Network;
 
@@ -6,6 +7,7 @@ public sealed class CalloutDriverClient : IDisposable
 {
     public const string DevicePath = @"\\.\SelectiveVpnCallout";
     private const uint IoctlSetTarget = 0x00222004; // CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
+    private const uint IoctlGetStatus = 0x00222008; // function 0x802
 
     private IntPtr _handle = new(-1);
 
@@ -35,6 +37,72 @@ public sealed class CalloutDriverClient : IDisposable
         }
 
         var buf = new TargetBuffer { ProxyPid = (uint)proxyPid, ProxyPort = proxyPort, Enabled = 1 };
+        return SendTarget(buf, out error);
+    }
+
+    public bool TryDisable(out string error)
+    {
+        error = "";
+        if (!IsLoaded)
+        {
+            return true;
+        }
+
+        return SendTarget(new TargetBuffer { Enabled = 0 }, out error);
+    }
+
+    public bool TryGetStatus(out CalloutArmStatus status, out string error)
+    {
+        status = new CalloutArmStatus();
+        error = "";
+        if (!IsLoaded)
+        {
+            error = "Callout driver is not loaded.";
+            return false;
+        }
+
+        int size = Marshal.SizeOf<StatusBuffer>();
+        IntPtr p = Marshal.AllocHGlobal(size);
+        try
+        {
+            if (!Native.DeviceIoControl(_handle, IoctlGetStatus, IntPtr.Zero, 0, p, (uint)size, out _, IntPtr.Zero))
+            {
+                error = "DeviceIoControl GET_STATUS failed " + Marshal.GetLastWin32Error();
+                return false;
+            }
+
+            var buf = Marshal.PtrToStructure<StatusBuffer>(p);
+            status = new CalloutArmStatus
+            {
+                DeviceOpen = true,
+                Enabled = buf.Enabled != 0,
+                ProxyPid = buf.ProxyPid,
+                ProxyPort = buf.ProxyPort,
+                CalloutId = buf.CalloutId,
+                OpenHandles = buf.OpenHandles,
+                Redirects = buf.Redirects,
+            };
+            return true;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(p);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (IsLoaded)
+        {
+            try { TryDisable(out _); } catch (Exception) { }
+            Native.CloseHandle(_handle);
+            _handle = new IntPtr(-1);
+        }
+    }
+
+    private bool SendTarget(TargetBuffer buf, out string error)
+    {
+        error = "";
         int size = Marshal.SizeOf<TargetBuffer>();
         IntPtr p = Marshal.AllocHGlobal(size);
         try
@@ -54,49 +122,23 @@ public sealed class CalloutDriverClient : IDisposable
         }
     }
 
-    public bool TryDisable(out string error)
-    {
-        error = "";
-        if (!IsLoaded)
-        {
-            return true;
-        }
-
-        var buf = new TargetBuffer { Enabled = 0 };
-        int size = Marshal.SizeOf<TargetBuffer>();
-        IntPtr p = Marshal.AllocHGlobal(size);
-        try
-        {
-            Marshal.StructureToPtr(buf, p, false);
-            if (!Native.DeviceIoControl(_handle, IoctlSetTarget, p, (uint)size, IntPtr.Zero, 0, out _, IntPtr.Zero))
-            {
-                error = "DeviceIoControl disable failed " + Marshal.GetLastWin32Error();
-                return false;
-            }
-
-            return true;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(p);
-        }
-    }
-
-    public void Dispose()
-    {
-        if (IsLoaded)
-        {
-            Native.CloseHandle(_handle);
-            _handle = new IntPtr(-1);
-        }
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct TargetBuffer
     {
         public uint ProxyPid;
         public ushort ProxyPort;
         public ushort Enabled;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct StatusBuffer
+    {
+        public uint ProxyPid;
+        public ushort ProxyPort;
+        public ushort Enabled;
+        public uint CalloutId;
+        public uint OpenHandles;
+        public uint Redirects;
     }
 
     private static class Native

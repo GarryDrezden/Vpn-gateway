@@ -57,7 +57,33 @@ MVP is **TCP-only** for per-process routing. UDP is unsupported. Optional “blo
 
 ## Fail-open
 
-- WFP session is **dynamic** (objects die with the service process).
-- OpenVPN is assigned a job object with kill-on-close (best-effort).
-- Crash state lists owned routes; startup deletes them if leftover.
-- Emergency Restore touches only owned routes, owned WFP objects, and the managed OpenVPN child.
+WFP management objects (filters, the session-scoped callout object, sublayer, provider) are added on a **dynamic** session (`FWPM_SESSION_FLAG_DYNAMIC`). When the service process dies, the BFE drops those objects. New connects are no longer redirected.
+
+The KMDF driver may remain loaded. It must not keep hijacking TCP:
+
+- Last close of `\\.\SelectiveVpnCallout` clears `gEnabled` (service crash closes the handle).
+- Classify also fail-opens if the proxy PID is gone, if redirect is not armed, or if the connecting PID is the proxy (loop).
+- Pause routing issues `IOCTL_SET_TARGET` with Enabled=0.
+
+Lifecycle:
+
+```
+service start
+  → open dynamic WFP session
+  → open driver device (handle held)
+  → add APP_ID filters + IPv6 block filters
+  → IOCTL arm proxy pid/port
+service stop / crash
+  → session destroyed → filters gone
+  → device handle closed → driver gEnabled=FALSE
+  → OpenVPN job kill-on-close
+  → owned routes removed on next start / Emergency Restore
+```
+
+Test Center **Kill service (fail-open)** (confirm) exercises the crash path. Expect Direct internet to keep working; restart the service after.
+
+## Owned high-metric VPN default
+
+`0.0.0.0/0` on the tunnel NIC, metric **9000**, reason `vpn-transport-high-metric`, recorded in crash-state. Test Center **Preferred default route** prints the system preferred default vs this owned fallback. Stop / Emergency Restore / startup cleanup remove it.
+
+Emergency Restore touches only owned routes, owned WFP objects, and the managed OpenVPN child.

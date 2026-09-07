@@ -58,13 +58,19 @@ public sealed class RouterEngine : IAsyncDisposable
         {
             RoutingPaused = _paused,
             DriverLoaded = _driver?.IsLoaded == true,
-            TransparentRedirectActive = _driver?.IsLoaded == true && !_paused && vpn?.Connected == true,
+            TransparentRedirectActive = _driver?.IsLoaded == true && !_paused && vpn?.Connected == true
+                && _driver.TryGetStatus(out CalloutArmStatus arm, out _) && arm.Enabled,
             Vpn = vpn?.Live() ?? new OpenVpnLiveStatus(),
             VpnAdapter = ToLive(_vpnAdapter),
             DirectAdapter = ToLive(_directAdapter),
             Flows = proxy?.Flows ?? [],
             LastDiagnostics = _diagnostics.TakeLast(40).ToArray(),
             OwnedRoutes = _owned.ToArray(),
+            PreferredDefault = PreferredRoutes.PreferredDirectDefault(),
+            OwnedTransportDefault = _owned.FirstOrDefault(r => r.Reason == "vpn-transport-high-metric"),
+            Callout = _driver is { IsLoaded: true } && _driver.TryGetStatus(out CalloutArmStatus st, out _)
+                ? st
+                : new CalloutArmStatus { DeviceOpen = _driver?.IsLoaded == true },
             Ipv6PolicyNote = DescribeIpv6(Config.Vpn.Ipv6Policy),
             UdpNote = Config.Vpn.BlockQuicForVpnApps
                 ? "Optional QUIC/UDP 443 block for VPN-routed apps is enabled (forces TCP fallback). Full UDP routing is not implemented."
@@ -204,12 +210,21 @@ public sealed class RouterEngine : IAsyncDisposable
     public void PauseRouting(bool pause)
     {
         _paused = pause;
+        if (pause)
+        {
+            try { _driver?.TryDisable(out _); } catch (Exception) { }
+        }
+        else if (_driver?.IsLoaded == true && _proxy is not null)
+        {
+            _driver.TrySetRedirectTarget(Environment.ProcessId, (ushort)_proxy.Port, out _);
+        }
+
         _ = RefreshPolicyAsync();
     }
 
-    public async Task<DiagnosticResult> RunDiagnosticAsync(string name, CancellationToken ct)
+    public async Task<DiagnosticResult> RunDiagnosticAsync(string name, CancellationToken ct, bool confirm = false)
     {
-        DiagnosticResult result = await DiagnosticCenter.RunAsync(this, name, ct).ConfigureAwait(false);
+        DiagnosticResult result = await DiagnosticCenter.RunAsync(this, name, ct, confirm).ConfigureAwait(false);
         _diagnostics.Enqueue(result);
         while (_diagnostics.Count > 80 && _diagnostics.TryDequeue(out _))
         {
@@ -259,6 +274,8 @@ public sealed class RouterEngine : IAsyncDisposable
     public int? ProxyPort => _proxy?.Port;
     public AdapterView? VpnAdapter => _vpnAdapter;
     public OpenVpnController? Vpn => _vpn;
+    public TransparentTcpProxy? Proxy => _proxy;
+    public CalloutDriverClient? Driver => _driver;
 
     public async ValueTask DisposeAsync() => await DisconnectAsync().ConfigureAwait(false);
 
@@ -269,7 +286,7 @@ public sealed class RouterEngine : IAsyncDisposable
         File.AppendAllText(Path.Combine(AppPaths.LogDirectory, "service.log"), line + Environment.NewLine);
     }
 
-    private async Task RefreshPolicyAsync()
+    public async Task RefreshPolicyAsync()
     {
         AppConfiguration cfg = Config;
         IReadOnlyList<string> vpnExes = _paused
@@ -278,9 +295,16 @@ public sealed class RouterEngine : IAsyncDisposable
                 .Select(r => r.Target)
                 .Where(File.Exists)
                 .ToList();
+        Ipv6Policy ipv6 = cfg.Vpn.Ipv6Policy;
+        if (ipv6 == Ipv6Policy.Auto)
+        {
+            bool vpn6 = _vpnAdapter?.Ipv6.Any(a => !a.StartsWith("fe80", StringComparison.OrdinalIgnoreCase)) == true;
+            ipv6 = vpn6 ? Ipv6Policy.VpnIfAvailable : Ipv6Policy.BlockForVpnRoutedApps;
+        }
+
         try
         {
-            _wfp?.ReplaceVpnAppFilters(vpnExes, cfg.Vpn.Ipv6Policy);
+            _wfp?.ReplaceVpnAppFilters(vpnExes, ipv6);
         }
         catch (Exception ex)
         {
@@ -372,7 +396,7 @@ public sealed class RouterEngine : IAsyncDisposable
 
 public static class DiagnosticCenter
 {
-    public static async Task<DiagnosticResult> RunAsync(RouterEngine engine, string name, CancellationToken ct)
+    public static async Task<DiagnosticResult> RunAsync(RouterEngine engine, string name, CancellationToken ct, bool confirm = false)
     {
         try
         {
@@ -394,7 +418,7 @@ public static class DiagnosticCenter
                 "ipv6" => Ipv6(engine),
                 "cleanup" => await Cleanup(engine).ConfigureAwait(false),
                 "export" => Pass(name, "Wrote " + engine.ExportDiagnosticsZip()),
-                _ => Fail(name, "Unknown diagnostic '" + name + "'."),
+                _ => await DriverAndIsolationTests.RunAsync(engine, name, confirm, ct).ConfigureAwait(false),
             };
         }
         catch (Exception ex)
@@ -510,7 +534,7 @@ public static class DiagnosticCenter
     {
         if (engine.Snapshot().DriverLoaded && engine.Snapshot().TransparentRedirectActive)
         {
-            return Pass("app-routing", "Callout driver is loaded and redirect is armed for VPN application rules. Use Probe.exe under an Application rule to verify isolation.");
+            return Warn("app-routing", "Driver is loaded and redirect can be armed. This is NOT proof of isolation. Run Test Center → Test transparent routing. Application routing is PASS only when that test prints PER-PROCESS ISOLATION: PASS.");
         }
 
         if (engine.ProxyPort is int port)

@@ -52,7 +52,7 @@ public sealed class WfpSession : IDisposable
                 TryAddAppCalloutFilter(exe);
             }
 
-            if (ipv6 is Ipv6Policy.BlockForVpnRoutedApps or Ipv6Policy.Auto)
+            if (ipv6 is Ipv6Policy.BlockForVpnRoutedApps)
             {
                 TryAddIpv6Block(exe);
             }

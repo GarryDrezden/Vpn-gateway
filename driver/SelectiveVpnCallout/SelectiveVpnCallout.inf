@@ -1,13 +1,13 @@
-; Selective VPN Router — minimal WFP connect-redirect callout (KMDF).
-; Install only with test signing or a proper EV certificate. See docs/DRIVER_SETUP.md.
+; Selective VPN Router — KMDF WFP connect-redirect callout (x64).
+; CatalogFile is omitted on purpose for development sc.exe install.
+; Production packaging should add a signed .cat. See docs/DRIVER_SIGNING.md.
 
 [Version]
 Signature   = "$WINDOWS NT$"
 Class       = System
 ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
 Provider    = %Manufacturer%
-DriverVer   = 09/07/2026,10.0.0.2
-CatalogFile = SelectiveVpnCallout.cat
+DriverVer   = 09/07/2026,10.0.2.0
 PnpLockdown = 1
 
 [DestinationDirs]
@@ -31,12 +31,18 @@ CopyFiles = @SelectiveVpnCallout.sys
 [SvrInstall.Services]
 AddService = SelectiveVpnCallout,0x00000002,SvrService
 
+[SvrInstall.Wdf]
+KmdfService = SelectiveVpnCallout, SvrWdf
+
 [SvrService]
 DisplayName    = %ServiceDesc%
 ServiceType    = 1
 StartType      = 3
 ErrorControl   = 1
 ServiceBinary  = %12%\SelectiveVpnCallout.sys
+
+[SvrWdf]
+KmdfLibraryVersion = 1.15
 
 [Strings]
 Manufacturer = "Selective VPN Router"

@@ -19,12 +19,14 @@ Record PASS / FAIL / notes for each.
 - Browse while personal VPN is up.
 - **Expect:** Browser/Direct traffic still uses normal internet. VPN adapter is up. No new *low-metric* `0.0.0.0/0` or `0.0.0.0/1` on the personal tunnel. Owned high-metric (9000) VPN default may exist — that is for the proxy only.
 
-## TEST 3 — Route Probe → VPN
+## TEST 3 — Route Probe → VPN (transparent)
 
-- Add Application rule: `SelectiveVpnRouter.Probe.exe` → VPN.
-- If driver loaded: `Probe --http https://api.ipify.org` (or configured endpoint). Live connections should show Probe, VPN, tunnel adapter.
-- If driver **not** loaded: Test Center “Test application routing” = WARNING. Then `Probe --via-proxy 127.0.0.1:<proxyPort> --http https://api.ipify.org` to exercise the VPN-bound proxy. Do **not** call that transparent per-process.
-- **Expect:** Probe egress via personal VPN (public IP / local address on tunnel).
+1. Install WDK, run `scripts\build-driver.ps1` (must PASS), sign or enable TESTSIGNING yourself ([DRIVER_SIGNING.md](DRIVER_SIGNING.md)), then `scripts\install-driver.ps1`.
+2. Start the elevated service, Connect personal VPN (`--route-nopull`).
+3. Test Center → **Preferred default route** — preferred default must stay Direct; owned VPN `0/0` metric 9000 is OK.
+4. Test Center → **Test transparent routing** (one button; installs a temporary full-path Probe copy rule).
+5. **Expect:** `PER-PROCESS ISOLATION: PASS` — VPN-probe via tunnel, DIRECT-probe on the normal NIC, both at once.
+6. Until that exact PASS, do **not** treat Application routing as proven. `Probe --via-proxy` is not transparent per-process.
 
 ## TEST 4 — Chrome (or any unlisted app) stays DIRECT
 

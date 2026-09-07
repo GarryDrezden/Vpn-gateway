@@ -101,4 +101,25 @@ public class ProxyForwardingTests
         Assert.True(n >= 1);
         Assert.Equal(token, back[0]);
     }
+
+    [Fact]
+    public async Task Socks5_to_proxy_listen_port_is_rejected_as_loop()
+    {
+        await using var proxy = new TransparentTcpProxy { BindOutboundToVpn = false };
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await proxy.StartAsync(IPAddress.Loopback, 0, cts.Token);
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, proxy.Port);
+        using NetworkStream ns = client.GetStream();
+        await ns.WriteAsync(new byte[] { 5, 1, 0 });
+        var hello = new byte[2];
+        await ns.ReadAsync(hello);
+        await ns.WriteAsync(new byte[]
+        {
+            5, 1, 0, 1, 127, 0, 0, 1,
+            (byte)(proxy.Port >> 8), (byte)(proxy.Port & 0xFF),
+        });
+        await Task.Delay(400);
+        Assert.Contains(proxy.Flows, f => f.Status == "loop-rejected");
+    }
 }

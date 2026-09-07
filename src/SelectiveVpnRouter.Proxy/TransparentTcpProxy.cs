@@ -122,6 +122,18 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
             return;
         }
 
+        if (original.Address.Equals(IPAddress.Loopback) && original.Port == Port)
+        {
+            Publish(new FlowEvent
+            {
+                Destination = original.Address.ToString(),
+                Port = original.Port,
+                Route = FlowRoute.Blocked,
+                Status = "loop-rejected",
+            });
+            return;
+        }
+
         int pid = 0;
         string processPath = "";
         try
@@ -145,9 +157,17 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
             Protocol = "TCP",
             Route = FlowRoute.Vpn,
             LocalInterface = VpnInterfaceName,
+            WfpRedirect = !socks && records.Length > 0,
+            RedirectRecordsApplied = false,
             Status = "connecting",
         };
         Publish(flow);
+
+        if (!socks && pid == Environment.ProcessId)
+        {
+            Publish(flow with { Status = "proxy-self-rejected", Route = FlowRoute.Blocked });
+            return;
+        }
 
         try
         {
@@ -170,6 +190,8 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
                 try
                 {
                     WfpRedirectSockets.SetRedirectRecords(outbound, records);
+                    flow = flow with { RedirectRecordsApplied = true };
+                    Publish(flow);
                 }
                 catch (SocketException)
                 {

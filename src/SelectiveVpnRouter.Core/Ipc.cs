@@ -36,6 +36,9 @@ public sealed record ServiceSnapshot
     public IReadOnlyList<FlowEvent> Flows { get; init; } = [];
     public IReadOnlyList<DiagnosticResult> LastDiagnostics { get; init; } = [];
     public IReadOnlyList<OwnedRoute> OwnedRoutes { get; init; } = [];
+    public DefaultRouteSnapshot? PreferredDefault { get; init; }
+    public OwnedRoute? OwnedTransportDefault { get; init; }
+    public CalloutArmStatus Callout { get; init; } = new();
     public string Ipv6PolicyNote { get; init; } = "";
     public string UdpNote { get; init; } = "UDP/QUIC per-process routing is unsupported in this MVP (TCP only).";
 }
@@ -72,6 +75,26 @@ public sealed record ConnectVpnRequest
     public string? OpenVpnPath { get; init; }
     public string? ProfilePath { get; init; }
     public bool? DisableDco { get; init; }
+}
+
+public sealed record DefaultRouteSnapshot
+{
+    public int InterfaceIndex { get; init; }
+    public uint Metric { get; init; }
+    public string NextHop { get; init; } = "";
+    public string AdapterName { get; init; } = "";
+    public bool IsVpnAdapter { get; init; }
+}
+
+public sealed record CalloutArmStatus
+{
+    public bool DeviceOpen { get; init; }
+    public bool Enabled { get; init; }
+    public uint ProxyPid { get; init; }
+    public ushort ProxyPort { get; init; }
+    public uint CalloutId { get; init; }
+    public uint OpenHandles { get; init; }
+    public uint Redirects { get; init; }
 }
 
 public static class DiagnosticOutcomes

@@ -103,5 +103,7 @@ public sealed record FlowEvent
     public string? RuleName { get; init; }
     public FlowRoute Route { get; init; }
     public string? LocalInterface { get; init; }
+    public bool WfpRedirect { get; init; }
+    public bool RedirectRecordsApplied { get; init; }
     public string Status { get; init; } = "new";
 }

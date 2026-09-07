@@ -9,7 +9,7 @@
 - Service: named-pipe IPC, diagnostics/Test Center backend, fail-open cleanup, emergency restore.
 - WPF GUI: rules, live flows, wizard, tray, emergency restore.
 - Probe: `--show-network --tcp --http --dns --watch --via-proxy --bind-if`.
-- Minimal KMDF connect-redirect callout source + INF (build with WDK).
+- Minimal KMDF connect-redirect callout: fail-open on last device close, proxy-PID/loop guards, GET_STATUS IOCTL, WDK-detecting build/install/check scripts, Test Center WFP DRIVER block, Probe `--spawn`/`--tcp6`. Driver binary is not claimed loaded until WDK build + install succeed.
 - Docs: architecture, research log, manual tests, driver setup, security, limitations.
 
 ## 0.1.x — V0 / V0.1 research

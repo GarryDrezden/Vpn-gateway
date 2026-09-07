@@ -1,26 +1,60 @@
 #include "SelectiveVpnCallout.h"
 
+volatile LONG gOpenHandles = 0;
 UINT32 gProxyPid = 0;
 UINT16 gProxyPort = 0;
-BOOLEAN gEnabled = FALSE;
+volatile BOOLEAN gEnabled = FALSE;
 UINT32 gCalloutId = 0;
-HANDLE gEngineHandle = NULL;
 HANDLE gRedirectHandle = NULL;
+volatile LONG gRedirects = 0;
 
 static WDFDEVICE gDevice = NULL;
 
-static NTSTATUS SvrDeviceControl(
-    WDFQUEUE Queue,
-    WDFREQUEST Request,
-    size_t OutputBufferLength,
-    size_t InputBufferLength,
-    ULONG IoControlCode
+VOID SvrFailOpen(VOID)
+{
+    gEnabled = FALSE;
+    gProxyPid = 0;
+    gProxyPort = 0;
+}
+
+VOID SvrEvtFileCreate(
+    _In_ WDFDEVICE Device,
+    _In_ WDFREQUEST Request,
+    _In_ WDFFILEOBJECT FileObject
+)
+{
+    UNREFERENCED_PARAMETER(Device);
+    UNREFERENCED_PARAMETER(FileObject);
+    InterlockedIncrement(&gOpenHandles);
+    WdfRequestComplete(Request, STATUS_SUCCESS);
+}
+
+VOID SvrEvtFileCleanup(
+    _In_ WDFFILEOBJECT FileObject
+)
+{
+    UNREFERENCED_PARAMETER(FileObject);
+    LONG left = InterlockedDecrement(&gOpenHandles);
+    if (left <= 0)
+    {
+        // Service/process died or closed the device: stop redirecting. Fail-open.
+        SvrFailOpen();
+        gOpenHandles = 0;
+    }
+}
+
+VOID SvrEvtIoDeviceControl(
+    _In_ WDFQUEUE Queue,
+    _In_ WDFREQUEST Request,
+    _In_ size_t OutputBufferLength,
+    _In_ size_t InputBufferLength,
+    _In_ ULONG IoControlCode
 )
 {
     UNREFERENCED_PARAMETER(Queue);
-    UNREFERENCED_PARAMETER(OutputBufferLength);
-
     NTSTATUS status = STATUS_SUCCESS;
+    size_t written = 0;
+
     if (IoControlCode == SVR_IOCTL_SET_TARGET)
     {
         SVR_TARGET *target = NULL;
@@ -30,7 +64,31 @@ static NTSTATUS SvrDeviceControl(
         {
             gProxyPid = target->ProxyPid;
             gProxyPort = target->ProxyPort;
-            gEnabled = target->Enabled != 0;
+            gEnabled = (target->Enabled != 0) && (target->ProxyPid != 0) && (target->ProxyPort != 0);
+        }
+    }
+    else if (IoControlCode == SVR_IOCTL_GET_STATUS)
+    {
+        SVR_STATUS *out = NULL;
+        size_t len = 0;
+        UNREFERENCED_PARAMETER(InputBufferLength);
+        if (OutputBufferLength < sizeof(SVR_STATUS))
+        {
+            status = STATUS_BUFFER_TOO_SMALL;
+        }
+        else
+        {
+            status = WdfRequestRetrieveOutputBuffer(Request, sizeof(SVR_STATUS), (PVOID *)&out, &len);
+            if (NT_SUCCESS(status) && out != NULL)
+            {
+                out->ProxyPid = gProxyPid;
+                out->ProxyPort = gProxyPort;
+                out->Enabled = gEnabled ? 1 : 0;
+                out->CalloutId = gCalloutId;
+                out->OpenHandles = (UINT32)gOpenHandles;
+                out->Redirects = (UINT32)gRedirects;
+                written = sizeof(SVR_STATUS);
+            }
         }
     }
     else
@@ -38,8 +96,7 @@ static NTSTATUS SvrDeviceControl(
         status = STATUS_INVALID_DEVICE_REQUEST;
     }
 
-    WdfRequestComplete(Request, status);
-    return status;
+    WdfRequestCompleteWithInformation(Request, status, written);
 }
 
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING RegistryPath)
@@ -63,6 +120,12 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
     }
 
     WdfDeviceInitSetIoType(init, WdfDeviceIoBuffered);
+    WdfDeviceInitSetExclusive(init, FALSE);
+
+    WDF_FILEOBJECT_CONFIG fileConfig;
+    WDF_FILEOBJECT_CONFIG_INIT(&fileConfig, SvrEvtFileCreate, WDF_NO_EVENT_CALLBACK, SvrEvtFileCleanup);
+    WdfDeviceInitSetFileObjectConfig(init, &fileConfig, WDF_NO_OBJECT_ATTRIBUTES);
+
     DECLARE_CONST_UNICODE_STRING(deviceName, SVR_DEVICE_NAME);
     status = WdfDeviceInitAssignName(init, &deviceName);
     if (!NT_SUCCESS(status))
@@ -88,7 +151,7 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
 
     WDF_IO_QUEUE_CONFIG qcfg;
     WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&qcfg, WdfIoQueueDispatchSequential);
-    qcfg.EvtIoDeviceControl = SvrDeviceControl;
+    qcfg.EvtIoDeviceControl = SvrEvtIoDeviceControl;
     WDFQUEUE queue;
     status = WdfIoQueueCreate(gDevice, &qcfg, WDF_NO_OBJECT_ATTRIBUTES, &queue);
     if (!NT_SUCCESS(status))
@@ -98,30 +161,40 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
 
     WdfControlFinishInitializing(gDevice);
 
-    status = SvrRegisterCallout();
+    status = SvrRegisterCallout(gDevice);
     return status;
 }
 
 VOID SvrEvtDriverUnload(_In_ WDFDRIVER Driver)
 {
     UNREFERENCED_PARAMETER(Driver);
-    gEnabled = FALSE;
+    SvrFailOpen();
     SvrUnregisterCallout();
 }
 
-NTSTATUS SvrRegisterCallout(VOID)
+NTSTATUS SvrRegisterCallout(_In_ WDFDEVICE Device)
 {
+    UNREFERENCED_PARAMETER(Device);
+
     NTSTATUS status = FwpsRedirectHandleCreate(&SVR_PROVIDER_GUID, 0, &gRedirectHandle);
     if (!NT_SUCCESS(status))
     {
         gRedirectHandle = NULL;
+        return status;
     }
 
     FWPS_CALLOUT callout = { 0 };
     callout.calloutKey = SVR_CALLOUT_CONNECT_REDIRECT_V4;
     callout.classifyFn = SvrClassifyConnectRedirect;
     callout.notifyFn = SvrNotify;
-    status = FwpsCalloutRegister(WdfDriverWdmGetDriverObject(WdfGetDriver()), &callout, &gCalloutId);
+    callout.flowDeleteFn = NULL;
+    status = FwpsCalloutRegister(WdfDeviceWdmGetDeviceObject(gDevice), &callout, &gCalloutId);
+    if (!NT_SUCCESS(status))
+    {
+        FwpsRedirectHandleDestroy(gRedirectHandle);
+        gRedirectHandle = NULL;
+    }
+
     return status;
 }
 

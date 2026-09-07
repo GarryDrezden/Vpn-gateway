@@ -75,6 +75,30 @@
             <Button Content="Test cleanup" Click="OnDiag" Tag="cleanup"/>
             <Button Content="Export diagnostic report" Click="OnDiag" Tag="export"/>
           </WrapPanel>
+          <TextBlock Margin="0,12,0,4" FontWeight="Bold" Text="WFP DRIVER"/>
+          <TextBlock TextWrapping="Wrap" Margin="0,0,0,4"
+                     Text="Transparent per-process TCP needs SelectiveVpnCallout.sys. These checks never enable TESTSIGNING, never disable Secure Boot/HVCI/BitLocker. Install/start/stop/uninstall and Kill service require confirmation. Application routing is not PASS until Test transparent routing is PASS."/>
+          <WrapPanel>
+            <Button Content="Check WDK build" Click="OnDiag" Tag="wdk-build"/>
+            <Button Content="Check driver binary" Click="OnDiag" Tag="driver-binary"/>
+            <Button Content="Check driver signature" Click="OnDiag" Tag="driver-signature"/>
+            <Button Content="Check Secure Boot" Click="OnDiag" Tag="secure-boot"/>
+            <Button Content="Check test-signing state" Click="OnDiag" Tag="testsigning"/>
+            <Button Content="Check HVCI" Click="OnDiag" Tag="hvci"/>
+            <Button Content="Install driver" Click="OnDiag" Tag="driver-install"/>
+            <Button Content="Start driver" Click="OnDiag" Tag="driver-start"/>
+            <Button Content="Check callout registration" Click="OnDiag" Tag="callout-registration"/>
+            <Button Content="Install temporary Probe rule" Click="OnDiag" Tag="temp-probe-rule"/>
+            <Button Content="Test transparent routing" Click="OnDiag" Tag="transparent-routing"/>
+            <Button Content="Remove temporary rule" Click="OnDiag" Tag="remove-temp-rule"/>
+            <Button Content="Stop driver" Click="OnDiag" Tag="driver-stop"/>
+            <Button Content="Uninstall driver" Click="OnDiag" Tag="driver-uninstall"/>
+            <Button Content="Preferred default route" Click="OnDiag" Tag="preferred-default"/>
+            <Button Content="Proxy loop protection" Click="OnDiag" Tag="proxy-loop"/>
+            <Button Content="Parent/child identity" Click="OnDiag" Tag="parent-child"/>
+            <Button Content="IPv6 leak protection" Click="OnDiag" Tag="ipv6-leak"/>
+            <Button Content="Kill service (fail-open)" Click="OnDiag" Tag="kill-service"/>
+          </WrapPanel>
         </DockPanel>
       </TabItem>
       <TabItem Header="Setup wizard">

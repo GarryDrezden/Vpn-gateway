@@ -2,9 +2,9 @@
 
 This is an MVP foundation, not a finished consumer VPN client.
 
-## Transparent per-process TCP needs the callout
+## Transparent per-process TCP needs a **built and loaded** callout
 
-User-mode cannot classify `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4`. Until `SelectiveVpnCallout.sys` is built, signed/test-signed, and loaded, Application rules do **not** silently hijack `Cursor.exe`. The GUI and Test Center say so. `Probe --via-proxy` still tests proxy + `IP_UNICAST_IF`.
+User-mode cannot classify `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4`. `driver/` is source. This machine may have VS + user-mode SDK **without** WDK `km` headers. Until `scripts\build-driver.ps1` PASSes and `scripts\check-driver.ps1` opens `\\.\SelectiveVpnCallout`, Application rules do not transparently hijack `Probe.exe` / `Cursor.exe`. Test Center **Test transparent routing** is the only test allowed to print `PER-PROCESS ISOLATION: PASS`. `Probe --via-proxy` still tests proxy + `IP_UNICAST_IF`.
 
 ## UDP / QUIC
 

@@ -68,6 +68,7 @@ If the GUI, service, OpenVPN, or driver policy goes away, Direct internet must k
 - [Network research](docs/NETWORK_ARCHITECTURE_RESEARCH.md)
 - [Manual test plan](docs/MANUAL_TEST_PLAN.md)
 - [Driver setup](docs/DRIVER_SETUP.md)
+- [Driver signing](docs/DRIVER_SIGNING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Security](docs/SECURITY.md)
 - [Known limitations](docs/KNOWN_LIMITATIONS.md)

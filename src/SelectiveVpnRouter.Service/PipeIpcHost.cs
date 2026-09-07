@@ -143,6 +143,7 @@ public sealed class PipeIpcHost : BackgroundService
     private async Task<string> Diag(string? json, CancellationToken ct)
     {
         string name = "admin";
+        bool confirm = false;
         if (!string.IsNullOrWhiteSpace(json))
         {
             using JsonDocument doc = JsonDocument.Parse(json);
@@ -150,9 +151,13 @@ public sealed class PipeIpcHost : BackgroundService
             {
                 name = n.GetString() ?? name;
             }
+            if (doc.RootElement.TryGetProperty("confirm", out JsonElement c) && c.ValueKind is JsonValueKind.True)
+            {
+                confirm = true;
+            }
         }
 
-        DiagnosticResult r = await _engine.RunDiagnosticAsync(name, ct).ConfigureAwait(false);
+        DiagnosticResult r = await _engine.RunDiagnosticAsync(name, ct, confirm).ConfigureAwait(false);
         return JsonSerializer.Serialize(r, ConfigSerializer.JsonOptions);
     }
 

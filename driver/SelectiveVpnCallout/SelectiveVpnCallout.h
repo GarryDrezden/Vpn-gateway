@@ -2,6 +2,7 @@
 
 #include <ntddk.h>
 #include <wdf.h>
+#include <wdmsec.h>
 #include <fwpsk.h>
 #include <fwpmk.h>
 #include <ws2ipdef.h>
@@ -19,6 +20,9 @@ DEFINE_GUID(SVR_PROVIDER_GUID,
 #define SVR_SYMLINK_NAME L"\\DosDevices\\SelectiveVpnCallout"
 
 #define SVR_IOCTL_SET_TARGET CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define SVR_IOCTL_GET_STATUS CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define SVR_POOL_TAG 'rvS'
 
 typedef struct _SVR_TARGET {
     UINT32 ProxyPid;
@@ -26,24 +30,38 @@ typedef struct _SVR_TARGET {
     UINT16 Enabled;
 } SVR_TARGET;
 
+typedef struct _SVR_STATUS {
+    UINT32 ProxyPid;
+    UINT16 ProxyPort;
+    UINT16 Enabled;
+    UINT32 CalloutId;
+    UINT32 OpenHandles;
+    UINT32 Redirects;
+} SVR_STATUS;
+
 typedef struct _SVR_REDIRECT_CONTEXT {
     UINT32 RemoteAddr; /* network order IPv4 */
     UINT16 RemotePort; /* network order */
     UINT16 Reserved;
 } SVR_REDIRECT_CONTEXT;
 
+extern volatile LONG gOpenHandles;
 extern UINT32 gProxyPid;
 extern UINT16 gProxyPort;
-extern BOOLEAN gEnabled;
+extern volatile BOOLEAN gEnabled;
 extern UINT32 gCalloutId;
-extern HANDLE gEngineHandle;
 extern HANDLE gRedirectHandle;
+extern volatile LONG gRedirects;
 
 DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_UNLOAD SvrEvtDriverUnload;
+EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL SvrEvtIoDeviceControl;
+EVT_WDF_DEVICE_FILE_CREATE SvrEvtFileCreate;
+EVT_WDF_FILE_CLEANUP SvrEvtFileCleanup;
 
-NTSTATUS SvrRegisterCallout(VOID);
+NTSTATUS SvrRegisterCallout(_In_ WDFDEVICE Device);
 VOID SvrUnregisterCallout(VOID);
+VOID SvrFailOpen(VOID);
 
 VOID NTAPI SvrClassifyConnectRedirect(
     _In_ const FWPS_INCOMING_VALUES *inFixedValues,

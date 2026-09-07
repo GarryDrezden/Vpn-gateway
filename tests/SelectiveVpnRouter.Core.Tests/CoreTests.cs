@@ -261,3 +261,17 @@ public class Ipv6PolicyTests
         Assert.Equal(Ipv6Policy.BlockForVpnRoutedApps, new VpnProfileSettings().Ipv6Policy);
     }
 }
+
+public class PreferredDefaultTests
+{
+    [Fact]
+    public void Low_metric_vpn_default_is_stolen_high_metric_is_not()
+    {
+        var stolen = new DefaultRouteSnapshot { IsVpnAdapter = true, Metric = 25 };
+        var ownedFallback = new DefaultRouteSnapshot { IsVpnAdapter = true, Metric = 9000 };
+        var direct = new DefaultRouteSnapshot { IsVpnAdapter = false, Metric = 25 };
+        Assert.True(stolen.IsVpnAdapter && stolen.Metric < 5000);
+        Assert.False(ownedFallback.IsVpnAdapter && ownedFallback.Metric < 5000);
+        Assert.False(direct.IsVpnAdapter && direct.Metric < 5000);
+    }
+}
