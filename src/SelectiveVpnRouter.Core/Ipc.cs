@@ -138,6 +138,9 @@ public static class IpcMethods
     public const string RunDiagnostic = "RunDiagnostic";
     public const string ExportDiagnostics = "ExportDiagnostics";
     public const string GetFlows = "GetFlows";
+    public const string ApplyTempAppVpnRoute = "ApplyTempAppVpnRoute";
+    public const string RemoveTempAppVpnRoute = "RemoveTempAppVpnRoute";
+    public const string GetTempAppVpnStatus = "GetTempAppVpnStatus";
 }
 
 public static class IpcTimeouts

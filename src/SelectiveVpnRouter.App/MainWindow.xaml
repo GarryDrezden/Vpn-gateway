@@ -85,6 +85,27 @@
                 <Button Content="Тест очистки" Click="OnDiag" Tag="cleanup"/>
                 <Button Content="Экспорт отчёта диагностики" Click="OnDiag" Tag="export"/>
               </WrapPanel>
+              <Border Margin="0,12,0,8" Padding="12" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="6" Background="#F8FAFC">
+                <StackPanel>
+                  <TextBlock FontWeight="Bold" FontSize="14" Text="Проверка реального приложения"/>
+                  <TextBlock TextWrapping="Wrap" Margin="0,6,0,8"
+                             Text="Временное VPN-правило только для выбранного EXE. Постоянные Rules не меняются. Откройте приложение и выполните TCP-запрос (например, https://api.ipify.org в браузере). Внешний IP приложение проверяете вы сами — автоматически мы его не утверждаем."/>
+                  <DockPanel LastChildFill="True" Margin="0,0,0,8">
+                    <Button DockPanel.Dock="Right" Content="Обзор EXE" Click="OnBrowseRealApp" MinWidth="110" Margin="8,0,0,0"/>
+                    <TextBox x:Name="RealAppExeBox" IsReadOnly="True" ToolTip="Полный путь к EXE"/>
+                  </DockPanel>
+                  <WrapPanel Margin="0,0,0,8">
+                    <Button Content="Временно направить приложение через VPN" Click="OnApplyTempRealApp"/>
+                    <Button Content="Удалить временное правило приложения" Click="OnRemoveTempRealApp"/>
+                    <Button Content="Обновить статус" Click="OnRefreshTempRealApp"/>
+                  </WrapPanel>
+                  <TextBlock x:Name="RealAppStatusLine" TextWrapping="Wrap" FontWeight="SemiBold" Text="Статус: правило не активно"/>
+                  <TextBlock x:Name="RealAppDetailLine" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="#4B5563" Text=""/>
+                  <Expander Header="Advanced diagnostics" Margin="0,8,0,0">
+                    <TextBlock x:Name="RealAppAdvancedLine" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Text=""/>
+                  </Expander>
+                </StackPanel>
+              </Border>
               <TextBlock Margin="0,12,0,4" FontWeight="Bold" Text="WFP-ДРАЙВЕР"/>
               <TextBlock TextWrapping="Wrap" Margin="0,0,0,4"
                          Text="Прозрачный per-process TCP требует SelectiveVpnCallout.sys. Эти проверки не включают TESTSIGNING и не отключают Secure Boot / HVCI / BitLocker. Установка, запуск, остановка, удаление драйвера и «Убить службу» требуют подтверждения. Маршрутизация приложений не считается PASS, пока «Тест прозрачной маршрутизации» не даст PASS."/>

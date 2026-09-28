@@ -12,7 +12,7 @@ using SelectiveVpnRouter.Proxy;
 
 namespace SelectiveVpnRouter.Service;
 
-public sealed class RouterEngine : IAsyncDisposable
+public sealed partial class RouterEngine : IAsyncDisposable
 {
     private readonly object _gate = new();
     private readonly List<OwnedRoute> _owned = [];
@@ -185,6 +185,7 @@ public sealed class RouterEngine : IAsyncDisposable
 
     public async Task DisconnectAsync()
     {
+        ClearTempRealAppRoute();
         _loopCts?.Cancel();
         _loopCts = null;
         try { _driver?.TryDisable(out _); } catch (Exception) { }
@@ -315,7 +316,8 @@ public sealed class RouterEngine : IAsyncDisposable
     public async Task RefreshPolicyAsync()
     {
         AppConfiguration cfg = Config;
-        IReadOnlyList<string> vpnExes = VpnApplicationPathCollector.Collect(cfg.Rules, _paused);
+        IEnumerable<string>? extra = _tempRealAppExePath is null ? null : [_tempRealAppExePath];
+        IReadOnlyList<string> vpnExes = VpnApplicationPathCollector.Collect(cfg.Rules, _paused, extra);
         Ipv6Policy ipv6 = cfg.Vpn.Ipv6Policy;
         if (ipv6 == Ipv6Policy.Auto)
         {

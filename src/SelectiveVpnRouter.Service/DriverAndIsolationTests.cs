@@ -222,9 +222,19 @@ internal static class DriverAndIsolationTests
                 $"; VPN-probe local={vpnLocal} ok={vpnOk}; DIRECT-probe local={directLocal} ok={directOk} directViaProxy={directViaProxy}; simultaneous=yes. " +
                 results[0].Output.Split('\n').FirstOrDefault() + " | " + results[1].Output.Split('\n').FirstOrDefault();
 
-            bool vpnThroughRedirect = applyModified && redirectContextRecovered && proxyFlowObserved && !directViaProxy;
+            bool vpnThroughRedirect = TransparentRoutingCriteria.IsPass(new TransparentRoutingCriteria.Input(
+                calloutMatched,
+                applyModified,
+                proxyAccepted,
+                redirectContextRecovered,
+                proxyFlowObserved,
+                vpnOk,
+                directOk,
+                directViaProxy,
+                localsDiffer,
+                engine.Snapshot().Vpn.Connected));
 
-            if (vpnOk && directOk && localsDiffer && vpnThroughRedirect)
+            if (vpnThroughRedirect)
             {
                 return Pass("transparent-routing", Bilingual(
                     "PER-PROCESS ISOLATION: PASS. " + detailEn,

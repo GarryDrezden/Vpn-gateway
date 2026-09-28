@@ -103,4 +103,39 @@ public class WfpPolicyTests
         Assert.NotNull(found);
         Assert.Equal(7UL, found!.FilterId);
     }
+
+    [Fact]
+    public void Vpn_path_collector_includes_extra_temp_exe_without_rule()
+    {
+        string temp = Path.Combine(Path.GetTempPath(), "svr-extra-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        try
+        {
+            string extraExe = Path.Combine(temp, "curl.exe");
+            File.WriteAllText(extraExe, "fake");
+
+            IReadOnlyList<string> paths = VpnApplicationPathCollector.Collect([], paused: false, extraVpnExePaths: [extraExe]);
+            Assert.Single(paths);
+            Assert.Equal(Path.GetFullPath(extraExe), paths[0], StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            try { Directory.Delete(temp, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void Filter_ready_requires_nonzero_filter_id()
+    {
+        var filter = new WfpFilterInstallResult
+        {
+            ExePath = @"C:\Apps\Probe.exe",
+            FileExists = true,
+            AppIdResolved = true,
+            FilterInstalled = true,
+            FilterId = 0,
+            IsCalloutFilter = true,
+        };
+        Assert.False(WfpPolicyHealth.IsExeFilterReady(filter));
+    }
 }

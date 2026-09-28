@@ -117,6 +117,9 @@ public sealed class PipeIpcHost : BackgroundService
                 IpcMethods.RunDiagnostic => await Diag(req.PayloadJson, ct).ConfigureAwait(false),
                 IpcMethods.ExportDiagnostics => JsonSerializer.Serialize(new { path = _engine.ExportDiagnosticsZip() }, ConfigSerializer.JsonOptions),
                 IpcMethods.GetFlows => JsonSerializer.Serialize(_engine.Snapshot().Flows, ConfigSerializer.JsonOptions),
+                IpcMethods.GetTempAppVpnStatus => JsonSerializer.Serialize(_engine.GetTempAppVpnStatus(), ConfigSerializer.JsonOptions),
+                IpcMethods.ApplyTempAppVpnRoute => await ApplyTempAppRoute(req.PayloadJson).ConfigureAwait(false),
+                IpcMethods.RemoveTempAppVpnRoute => await RemoveTempAppRoute().ConfigureAwait(false),
                 _ => throw new InvalidOperationException("Unknown method " + req.Method),
             };
             return new IpcResponse { Id = req.Id, Ok = true, PayloadJson = payload };
@@ -197,6 +200,20 @@ public sealed class PipeIpcHost : BackgroundService
 
         DiagnosticResult r = await _engine.RunDiagnosticAsync(name, ct, confirm).ConfigureAwait(false);
         return JsonSerializer.Serialize(r, ConfigSerializer.JsonOptions);
+    }
+
+    private async Task<string> ApplyTempAppRoute(string? json)
+    {
+        TempAppVpnRequest req = JsonSerializer.Deserialize<TempAppVpnRequest>(json ?? "{}", ConfigSerializer.JsonOptions)
+            ?? throw new InvalidOperationException("Invalid temp app request.");
+        TempAppVpnStatus status = await _engine.ApplyTempAppVpnRouteAsync(req.ExePath).ConfigureAwait(false);
+        return JsonSerializer.Serialize(status, ConfigSerializer.JsonOptions);
+    }
+
+    private async Task<string> RemoveTempAppRoute()
+    {
+        TempAppVpnStatus status = await _engine.RemoveTempAppVpnRouteAsync().ConfigureAwait(false);
+        return JsonSerializer.Serialize(status, ConfigSerializer.JsonOptions);
     }
 
     private static NamedPipeServerStream CreatePipe()

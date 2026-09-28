@@ -2,9 +2,11 @@
 
 This is an MVP foundation, not a finished consumer VPN client.
 
-## Transparent per-process TCP needs a **built and loaded** callout
+## Transparent per-process TCP (verified on Windows x64)
 
-User-mode cannot classify `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4`. `driver/` is source. This machine may have VS + user-mode SDK **without** WDK `km` headers. Until `scripts\build-driver.ps1` PASSes and `scripts\check-driver.ps1` opens `\\.\SelectiveVpnCallout`, Application rules do not transparently hijack `Probe.exe` / `Cursor.exe`. Test Center **Test transparent routing** is the only test allowed to print `PER-PROCESS ISOLATION: PASS`. `Probe --via-proxy` still tests proxy + `IP_UNICAST_IF`.
+End-to-end TCP path is verified: Application rule → WFP ALE APP_ID → connect-redirect callout → localhost proxy → redirect context → VPN-bound outbound. Test Center **Test transparent routing** is the automated Probe acceptance test. **Проверка реального приложения** adds a temporary APP_ID rule for any user-selected `.exe` and observes WFP/proxy flows; it does **not** automatically prove external IP for arbitrary GUI apps.
+
+You still need a **built and loaded** callout (`scripts\build-driver.ps1`, `scripts\check-driver.ps1` → `\\.\SelectiveVpnCallout`). Without the driver, Application rules cannot transparently hijack TCP connects.
 
 ## UDP / QUIC
 

@@ -4,6 +4,31 @@ Windows 10/11 x64 app that keeps **normal Direct internet** as the system defaul
 
 Quick scenario: **route Cursor through personal VPN while Git stays Direct.**
 
+## Milestone: per-process TCP routing verified end-to-end
+
+On Windows 10/11 x64, **transparent per-process TCP routing** is verified for the Probe path:
+
+Application rule → WFP `FWPM_CONDITION_ALE_APP_ID` → `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4` → KMDF callout (`SelectiveVpnCallout.sys`) → localhost transparent proxy → WFP redirect context recovery → VPN-bound outbound socket.
+
+A simultaneous Direct process stays off the proxy and keeps Direct egress.
+
+Git tag: `per-process-routing-pass-v1`
+
+### Verified now
+
+- TCP connect-redirect for selected `.exe` processes
+- WFP ALE APP_ID filter install + callout redirect
+- Local proxy accept + redirect context recovery
+- VPN-bound outbound socket creation
+- Per-process isolation (VPN app vs Direct app at the same time)
+
+### Not verified yet (do not assume support)
+
+- UDP / QUIC per-process routing
+- IPv6 connect-redirect policy end-to-end
+- DNS behaviour for arbitrary apps
+- External egress IP for arbitrary GUI apps without a controlled HTTP client (use Test Center **Проверка реального приложения** and observe WFP/proxy flows; check public IP yourself in the browser)
+
 ## What this is
 
 | Piece | Role |

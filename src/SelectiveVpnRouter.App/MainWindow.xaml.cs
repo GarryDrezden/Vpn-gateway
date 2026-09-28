@@ -127,6 +127,7 @@ public partial class MainWindow : Window
             FlowsGrid.ItemsSource = snap.Flows;
             LogBox.Text = string.Join(Environment.NewLine, snap.Vpn.RecentLog);
             _tray.Text = snap.Vpn.Connected ? "Selective VPN Router — подключён" : "Selective VPN Router — отключён";
+            await RefreshTempRealAppStatusAsync();
         }
         catch (Exception)
         {
@@ -284,6 +285,164 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog() == true)
         {
             FirstAppBox.Text = dlg.FileName;
+        }
+    }
+
+    private void OnBrowseRealApp(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog { Filter = "Программы (*.exe)|*.exe" };
+        if (dlg.ShowDialog() == true)
+        {
+            RealAppExeBox.Text = dlg.FileName;
+        }
+    }
+
+    private async void OnApplyTempRealApp(object sender, RoutedEventArgs e)
+    {
+        string exe = RealAppExeBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(exe))
+        {
+            MessageBox.Show("Выберите EXE через «Обзор EXE».", "Selective VPN Router");
+            return;
+        }
+
+        if (!File.Exists(exe))
+        {
+            MessageBox.Show("Файл не найден: " + exe, "Selective VPN Router");
+            return;
+        }
+
+        if (!await IsVpnConnectedAsync())
+        {
+            MessageBox.Show("Сначала подключите VPN.", "Selective VPN Router");
+            return;
+        }
+
+        try
+        {
+            TempAppVpnStatus status = await _client.SendOkAsync<TempAppVpnStatus>(
+                IpcMethods.ApplyTempAppVpnRoute,
+                new TempAppVpnRequest { ExePath = exe },
+                _cts.Token) ?? new TempAppVpnStatus();
+            ApplyTempRealAppStatus(status);
+            if (!string.IsNullOrWhiteSpace(status.Error))
+            {
+                MessageBox.Show(status.Error, "Selective VPN Router");
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Selective VPN Router");
+        }
+    }
+
+    private async void OnRemoveTempRealApp(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            TempAppVpnStatus status = await _client.SendOkAsync<TempAppVpnStatus>(
+                IpcMethods.RemoveTempAppVpnRoute,
+                null,
+                _cts.Token) ?? new TempAppVpnStatus();
+            ApplyTempRealAppStatus(status);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Selective VPN Router");
+        }
+    }
+
+    private async void OnRefreshTempRealApp(object sender, RoutedEventArgs e) => await RefreshTempRealAppStatusAsync(force: true);
+
+    private async Task RefreshTempRealAppStatusAsync(bool force = false)
+    {
+        if (_connectUiActive && !force)
+        {
+            return;
+        }
+
+        try
+        {
+            TempAppVpnStatus? status = await _client.SendOkAsync<TempAppVpnStatus>(
+                IpcMethods.GetTempAppVpnStatus,
+                null,
+                _cts.Token);
+            if (status is not null)
+            {
+                ApplyTempRealAppStatus(status);
+            }
+        }
+        catch (Exception)
+        {
+            RealAppStatusLine.Text = "Статус: служба недоступна";
+            RealAppStatusLine.Foreground = System.Windows.Media.Brushes.Gray;
+            RealAppDetailLine.Text = string.Empty;
+            RealAppAdvancedLine.Text = string.Empty;
+        }
+    }
+
+    private void ApplyTempRealAppStatus(TempAppVpnStatus status)
+    {
+        if (!string.IsNullOrWhiteSpace(status.ExePath))
+        {
+            RealAppExeBox.Text = status.ExePath;
+        }
+
+        if (!status.Active)
+        {
+            RealAppStatusLine.Text = "Статус: правило не активно";
+            RealAppStatusLine.Foreground = System.Windows.Media.Brushes.Gray;
+            RealAppDetailLine.Text = "Выберите EXE и включите временный VPN-маршрут.";
+            RealAppAdvancedLine.Text = string.Empty;
+            return;
+        }
+
+        string policyLine =
+            $"fileExists={status.FileExists} appIdResolved={status.AppIdResolved} " +
+            $"filterInstalled={status.FilterInstalled} filterId={status.FilterId}";
+        RealAppAdvancedLine.Text = policyLine + (status.Error is null ? "" : Environment.NewLine + status.Error);
+
+        RealAppDetailLine.Text = status.Summary;
+        switch (status.ObservationState)
+        {
+            case RealAppRoutingObservation.Pass:
+                RealAppStatusLine.Text = "PASS — маршрутизация выбранного приложения наблюдается";
+                RealAppStatusLine.Foreground = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(0x15, 0x80, 0x3D));
+                break;
+            case RealAppRoutingObservation.Partial:
+                RealAppStatusLine.Text = "Частично — WFP redirect без полной цепочки proxy/VPN";
+                RealAppStatusLine.Foreground = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(0xB4, 0x53, 0x09));
+                break;
+            case RealAppRoutingObservation.Waiting:
+                RealAppStatusLine.Text = "WAITING — правило активно, трафик приложения ещё не наблюдался";
+                RealAppStatusLine.Foreground = System.Windows.Media.Brushes.Gray;
+                break;
+            default:
+                if (!status.FilterInstalled || status.FilterId == 0)
+                {
+                    RealAppStatusLine.Text = "FAIL — WFP filter не установлен";
+                    RealAppStatusLine.Foreground = new System.Windows.Media.SolidColorBrush(
+                        System.Windows.Media.Color.FromRgb(0xB9, 0x1C, 0x1C));
+                }
+                else
+                {
+                    RealAppStatusLine.Text = "Правило активно — ожидание трафика";
+                    RealAppStatusLine.Foreground = System.Windows.Media.Brushes.Gray;
+                }
+
+                break;
+        }
+
+        if (status.Flows.Count > 0)
+        {
+            RealAppFlowObservation flow = status.Flows[0];
+            RealAppDetailLine.Text =
+                $"Process PID={flow.Pid}  dest={flow.Destination}:{flow.Port}{Environment.NewLine}" +
+                $"WFP redirected={flow.WfpRedirect}  proxy accepted={flow.ProxyAccepted}  " +
+                $"redirect context={flow.RedirectRecordsApplied}  VPN-bound outbound={flow.VpnBoundOutboundCreated}{Environment.NewLine}" +
+                $"Route={flow.Route}  local={flow.LocalInterface ?? "—"}  status={flow.Status}";
         }
     }
 
