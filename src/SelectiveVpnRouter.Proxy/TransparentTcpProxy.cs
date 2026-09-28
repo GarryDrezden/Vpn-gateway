@@ -6,22 +6,18 @@ using SelectiveVpnRouter.Network;
 
 namespace SelectiveVpnRouter.Proxy;
 
-/// <summary>
-/// Local TCP relay. Accepts:
-/// 1. WFP-redirected sockets (original destination in redirect context)
-/// 2. Explicit SOCKS5 clients (Probe --via-proxy)
-/// Outbound sockets are bound to the VPN interface with IP_UNICAST_IF when configured.
-/// </summary>
 public sealed class TransparentTcpProxy : IAsyncDisposable
 {
-    private readonly ConcurrentDictionary<string, FlowEvent> _flows = new();
+    private readonly ConcurrentDictionary<Guid, FlowEvent> _flows = new();
+    private long _flowSequence;
     private int _acceptedConnections;
     private int _redirectContextQueries;
     private int _redirectContextSuccess;
     private int _redirectContextFailures;
     private int _lastRedirectContextError;
     private TcpListener? _listener;
-    private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _lifetimeCts;
+    private CancellationToken _lifetimeToken;
     private Task? _accept;
 
     public int Port { get; private set; }
@@ -39,15 +35,17 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
 
     public event Action<FlowEvent>? FlowChanged;
 
-    public IReadOnlyList<FlowEvent> Flows => _flows.Values.OrderByDescending(f => f.Time).Take(200).ToList();
+    public IReadOnlyList<FlowEvent> Flows =>
+        _flows.Values.OrderByDescending(f => f.UpdatedAt).ThenByDescending(f => f.SequenceId).Take(200).ToList();
 
-    public async Task StartAsync(IPAddress listenAddress, int port, CancellationToken ct)
+    public async Task StartAsync(IPAddress listenAddress, int port, CancellationToken lifetimeToken)
     {
+        _lifetimeToken = lifetimeToken;
+        _lifetimeCts = CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
         _listener = new TcpListener(listenAddress, port);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _accept = AcceptLoop(_cts.Token);
+        _accept = AcceptLoop(_lifetimeCts.Token);
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
@@ -55,7 +53,7 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
     {
         try
         {
-            _cts?.Cancel();
+            _lifetimeCts?.Cancel();
             _listener?.Stop();
             if (_accept is not null)
             {
@@ -66,17 +64,17 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
         {
         }
 
-        _cts?.Dispose();
+        _lifetimeCts?.Dispose();
     }
 
-    private async Task AcceptLoop(CancellationToken ct)
+    private async Task AcceptLoop(CancellationToken acceptToken)
     {
-        while (!ct.IsCancellationRequested && _listener is not null)
+        while (!acceptToken.IsCancellationRequested && _listener is not null)
         {
             TcpClient incoming;
             try
             {
-                incoming = await _listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+                incoming = await _listener.AcceptTcpClientAsync(acceptToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -87,11 +85,11 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
                 return;
             }
 
-            _ = Task.Run(() => HandleAsync(incoming, ct), ct);
+            _ = Task.Run(() => HandleAsync(incoming));
         }
     }
 
-    private async Task HandleAsync(TcpClient incoming, CancellationToken ct)
+    private async Task HandleAsync(TcpClient incoming)
     {
         Interlocked.Increment(ref _acceptedConnections);
         using TcpClient client = incoming;
@@ -100,6 +98,9 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
         IPEndPoint? original = null;
         byte[] records = [];
         NetworkStream inbound = client.GetStream();
+        string phase = "accept";
+        Guid flowId = Guid.NewGuid();
+        long sequenceId = Interlocked.Increment(ref _flowSequence);
         byte[] peek = new byte[1];
         bool socks = false;
         try
@@ -107,21 +108,28 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
             int peeked = accepted.Receive(peek, 0, 1, SocketFlags.Peek);
             socks = peeked == 1 && peek[0] == 5;
         }
-        catch (SocketException)
+        catch (SocketException ex)
         {
+            PublishTerminalError(new FlowEvent { FlowId = flowId, SequenceId = sequenceId }, phase, ex, null);
+            return;
         }
 
         if (socks)
         {
-            original = await Socks5.TryHandshakeAsync(inbound, ct).ConfigureAwait(false);
+            original = await Socks5.TryHandshakeAsync(inbound, _lifetimeToken).ConfigureAwait(false);
         }
         else
         {
             try
             {
+                phase = "query-redirect-records";
                 Interlocked.Increment(ref _redirectContextQueries);
                 records = WfpRedirectSockets.QueryRedirectRecords(accepted);
+
+                phase = "query-redirect-context";
                 byte[] ctx = WfpRedirectSockets.QueryRedirectContext(accepted);
+
+                phase = "parse-context";
                 if (WfpRedirectSockets.TryParseContext(ctx, out IPEndPoint parsed))
                 {
                     Interlocked.Increment(ref _redirectContextSuccess);
@@ -141,6 +149,8 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
                     SocketException se => se.ErrorCode,
                     _ => ex.HResult,
                 });
+                PublishTerminalError(new FlowEvent { FlowId = flowId, SequenceId = sequenceId }, phase, ex, null);
+                return;
             }
         }
 
@@ -149,14 +159,18 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
             return;
         }
 
-        if (original.Address.Equals(IPAddress.Loopback) && original.Port == Port)
+        string? bypassReason = FlowStatusHelper.TryGetBypassReason(original, socks, Port);
+        if (bypassReason is not null)
         {
             Publish(new FlowEvent
             {
+                FlowId = flowId,
+                SequenceId = sequenceId,
                 Destination = original.Address.ToString(),
                 Port = original.Port,
                 Route = FlowRoute.Blocked,
-                Status = "loop-rejected",
+                BypassReason = bypassReason,
+                Status = FlowStatusHelper.FormatBypassStatus(bypassReason),
             });
             return;
         }
@@ -175,33 +189,54 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
         {
         }
 
-        var flow = new FlowEvent
-        {
-            ProcessPath = processPath,
-            Pid = pid,
-            Destination = original.Address.ToString(),
-            Port = original.Port,
-            Protocol = "TCP",
-            Route = FlowRoute.Vpn,
-            LocalInterface = VpnInterfaceName,
-            WfpRedirect = !socks && records.Length > 0,
-            RedirectRecordsApplied = false,
-            Status = "connecting",
-        };
-        Publish(flow);
-
         if (!socks && pid == Environment.ProcessId)
         {
-            Publish(flow with { Status = "proxy-self-rejected", Route = FlowRoute.Blocked });
+            Publish(new FlowEvent
+            {
+                FlowId = flowId,
+                SequenceId = sequenceId,
+                ProcessPath = processPath,
+                Pid = pid,
+                Destination = original.Address.ToString(),
+                Port = original.Port,
+                Route = FlowRoute.Blocked,
+                BypassReason = "proxy-pid",
+                Status = FlowLifecycle.ProxySelfRejected,
+            });
             return;
+        }
+
+        FlowEvent flow = CreateFlow(flowId, sequenceId, processPath, pid, original, socks, records);
+        Publish(flow with { Status = FlowLifecycle.Accepted, ProxyAccepted = true });
+
+        if (records.Length > 0)
+        {
+            Publish(flow with
+            {
+                Status = FlowLifecycle.RedirectContextRecovered,
+                ProxyAccepted = true,
+                RedirectRecordsApplied = true,
+            });
         }
 
         try
         {
+            phase = "create-outbound";
             using var outbound = new Socket(original.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
             outbound.NoDelay = true;
+            Publish(flow with
+            {
+                Status = FlowLifecycle.OutboundCreated,
+                ProxyAccepted = true,
+                RedirectRecordsApplied = records.Length > 0,
+                VpnOutboundCreated = true,
+                VpnInterfaceIndex = VpnInterfaceIndex,
+            });
+
+            string? localBind = null;
             if (BindOutboundToVpn && VpnInterfaceIndex is int idx && idx > 0)
             {
+                phase = "bind-vpn";
                 if (original.AddressFamily == AddressFamily.InterNetwork)
                 {
                     SocketInterfaceBinder.BindIpv4UnicastIf(outbound, idx);
@@ -210,56 +245,202 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
                 {
                     SocketInterfaceBinder.BindIpv6UnicastIf(outbound, idx);
                 }
+
+                localBind = outbound.LocalEndPoint?.ToString();
+                Publish(flow with
+                {
+                    Status = FlowLifecycle.OutboundBound,
+                    ProxyAccepted = true,
+                    RedirectRecordsApplied = records.Length > 0,
+                    VpnOutboundCreated = true,
+                    VpnOutboundBound = true,
+                    VpnInterfaceIndex = idx,
+                    OutboundLocalEndpoint = localBind,
+                });
             }
 
             if (records.Length > 0)
             {
-                try
-                {
-                    WfpRedirectSockets.SetRedirectRecords(outbound, records);
-                    flow = flow with { RedirectRecordsApplied = true };
-                    Publish(flow);
-                }
-                catch (SocketException)
-                {
-                }
+                phase = "set-redirect-records";
+                WfpRedirectSockets.SetRedirectRecords(outbound, records);
             }
 
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(20));
-            await outbound.ConnectAsync(original, timeoutCts.Token).ConfigureAwait(false);
-            flow = flow with { Status = "open" };
-            Publish(flow);
+            phase = "connect-original-destination";
+            Publish(flow with
+            {
+                Status = FlowLifecycle.Connecting,
+                ProxyAccepted = true,
+                RedirectRecordsApplied = records.Length > 0,
+                VpnOutboundCreated = true,
+                VpnOutboundBound = BindOutboundToVpn && VpnInterfaceIndex > 0,
+                VpnInterfaceIndex = VpnInterfaceIndex,
+                OutboundLocalEndpoint = localBind,
+            });
+
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeToken);
+            connectCts.CancelAfter(TimeSpan.FromMilliseconds(FlowStatusHelper.DefaultConnectTimeoutMs));
+            try
+            {
+                await outbound.ConnectAsync(original, connectCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException ex)
+            {
+                bool timeout = connectCts.IsCancellationRequested && !_lifetimeToken.IsCancellationRequested;
+                bool serviceStopping = _lifetimeToken.IsCancellationRequested;
+                PublishTerminalError(
+                    flow with
+                    {
+                        ProxyAccepted = true,
+                        RedirectRecordsApplied = records.Length > 0,
+                        VpnOutboundCreated = true,
+                        VpnOutboundBound = BindOutboundToVpn && VpnInterfaceIndex > 0,
+                        VpnInterfaceIndex = VpnInterfaceIndex,
+                        OutboundLocalEndpoint = localBind,
+                        Destination = original.Address.ToString(),
+                        Port = original.Port,
+                    },
+                    phase,
+                    ex,
+                    new ConnectErrorContext(original, localBind, timeout, serviceStopping));
+                return;
+            }
+
+            string remote = outbound.RemoteEndPoint?.ToString() ?? original.ToString();
+            Publish(flow with
+            {
+                Status = FlowLifecycle.Connected,
+                ProxyAccepted = true,
+                RedirectRecordsApplied = records.Length > 0,
+                VpnOutboundCreated = true,
+                VpnOutboundBound = BindOutboundToVpn && VpnInterfaceIndex > 0,
+                VpnOutboundConnected = true,
+                VpnInterfaceIndex = VpnInterfaceIndex,
+                OutboundLocalEndpoint = outbound.LocalEndPoint?.ToString(),
+                OutboundRemoteEndpoint = remote,
+            });
+
+            phase = "copy-client-to-remote";
+            Publish(flow with
+            {
+                Status = FlowLifecycle.Relaying,
+                ProxyAccepted = true,
+                RedirectRecordsApplied = records.Length > 0,
+                VpnOutboundCreated = true,
+                VpnOutboundBound = BindOutboundToVpn && VpnInterfaceIndex > 0,
+                VpnOutboundConnected = true,
+                VpnInterfaceIndex = VpnInterfaceIndex,
+                OutboundLocalEndpoint = outbound.LocalEndPoint?.ToString(),
+                OutboundRemoteEndpoint = remote,
+            });
 
             using NetworkStream outboundStream = new(outbound, ownsSocket: false);
-            Task a = inbound.CopyToAsync(outboundStream, ct);
-            Task b = outboundStream.CopyToAsync(inbound, ct);
+            using var relayCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeToken);
+            Task a = inbound.CopyToAsync(outboundStream, relayCts.Token);
+            Task b = outboundStream.CopyToAsync(inbound, relayCts.Token);
             await Task.WhenAny(a, b).ConfigureAwait(false);
-            flow = flow with { Status = "closed" };
-            Publish(flow);
+            Publish(flow with
+            {
+                Status = FlowLifecycle.Closed,
+                ProxyAccepted = true,
+                RedirectRecordsApplied = records.Length > 0,
+                VpnOutboundCreated = true,
+                VpnOutboundBound = BindOutboundToVpn && VpnInterfaceIndex > 0,
+                VpnOutboundConnected = true,
+                VpnInterfaceIndex = VpnInterfaceIndex,
+                OutboundLocalEndpoint = outbound.LocalEndPoint?.ToString(),
+                OutboundRemoteEndpoint = remote,
+            });
         }
         catch (Exception ex)
         {
-            Publish(flow with { Status = "error: " + ex.GetType().Name });
+            PublishTerminalError(flow, phase, ex, null);
         }
+    }
+
+    private static FlowEvent CreateFlow(
+        Guid flowId,
+        long sequenceId,
+        string processPath,
+        int pid,
+        IPEndPoint original,
+        bool socks,
+        byte[] records) =>
+        new()
+        {
+            FlowId = flowId,
+            SequenceId = sequenceId,
+            ProcessPath = processPath,
+            Pid = pid,
+            Destination = original.Address.ToString(),
+            Port = original.Port,
+            Protocol = "TCP",
+            Route = FlowRoute.Vpn,
+            LocalInterface = null,
+            WfpRedirect = !socks && records.Length > 0,
+        };
+
+    private sealed record ConnectErrorContext(
+        IPEndPoint Destination,
+        string? LocalBind,
+        bool ConnectTimeout,
+        bool ServiceStopping);
+
+    private void PublishTerminalError(FlowEvent flow, string phase, Exception ex, ConnectErrorContext? ctx)
+    {
+        bool connectTimeout = ctx?.ConnectTimeout == true;
+        bool serviceStopping = ctx?.ServiceStopping == true;
+        FlowErrorDetails details = FlowStatusHelper.ErrorFromException(
+            phase,
+            ex,
+            connectTimeout,
+            serviceStopping,
+            FlowStatusHelper.DefaultConnectTimeoutMs) with
+        {
+            Destination = ctx?.Destination.ToString() ?? flow.Destination,
+            VpnInterfaceIndex = flow.VpnInterfaceIndex ?? VpnInterfaceIndex,
+            LocalBindEndpoint = ctx?.LocalBind ?? flow.OutboundLocalEndpoint,
+        };
+
+        string status = connectTimeout || serviceStopping ? FlowLifecycle.Cancelled : FlowLifecycle.Error;
+        Publish(flow with
+        {
+            ErrorDetails = details,
+            Status = status,
+            VpnInterfaceIndex = flow.VpnInterfaceIndex ?? VpnInterfaceIndex,
+            OutboundLocalEndpoint = ctx?.LocalBind ?? flow.OutboundLocalEndpoint,
+        });
     }
 
     private void Publish(FlowEvent flow)
     {
-        string key = flow.Pid + "|" + flow.Destination + "|" + flow.Port + "|" + flow.Time.Ticks;
-        _flows[key] = flow;
+        if (_flows.TryGetValue(flow.FlowId, out FlowEvent? existing)
+            && FlowStatusHelper.IsTerminal(existing.Status)
+            && !FlowStatusHelper.IsTerminal(flow.Status))
+        {
+            return;
+        }
+
+        FlowEvent stamped = flow with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow,
+            LocalInterface = flow.LocalInterface ?? VpnInterfaceName,
+        };
+        _flows[flow.FlowId] = stamped;
         while (_flows.Count > 300)
         {
-            string? oldest = _flows.OrderBy(kv => kv.Value.Time).Select(kv => kv.Key).FirstOrDefault();
-            if (oldest is null)
+            Guid? oldest = _flows.Values
+                .OrderBy(f => f.UpdatedAt)
+                .Select(f => f.FlowId)
+                .FirstOrDefault();
+            if (oldest is null || oldest == Guid.Empty)
             {
                 break;
             }
 
-            _flows.TryRemove(oldest, out _);
+            _flows.TryRemove(oldest.Value, out _);
         }
 
-        FlowChanged?.Invoke(flow);
+        FlowChanged?.Invoke(stamped);
     }
 }
 

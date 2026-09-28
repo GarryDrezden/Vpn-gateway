@@ -28,6 +28,27 @@ Record PASS / FAIL / notes for each.
 5. **Expect:** `PER-PROCESS ISOLATION: PASS` — VPN-probe via tunnel, DIRECT-probe on the normal NIC, both at once.
 6. Until that exact PASS, do **not** treat Application routing as proven. `Probe --via-proxy` is not transparent per-process.
 
+## TEST 3b — Real application (curl.exe) acceptance
+
+Use Test Center → **Проверка реального приложения** with `C:\Windows\System32\curl.exe`.
+
+1. Connect VPN, enable temporary rule for `curl.exe`.
+2. **A)** `Resolve-DnsName api.ipify.org -Type A` then `curl.exe -4 https://api.ipify.org`
+3. If step A DNS fails with `getaddrinfo() thread failed to start`, run **B)**  
+   `curl.exe -4 --resolve "api.ipify.org:443:<A-record>" https://api.ipify.org`
+4. **C)** Remove temporary rule, repeat `curl.exe -4 https://api.ipify.org`.
+
+**Interpret:**
+
+| Outcome | Meaning |
+| --- | --- |
+| DNS_FAIL | Step A name resolution failed; not proof that TCP routing failed |
+| TCP_ROUTING_PASS | Test Center shows ROUTING OBSERVED / WARNING with WFP+proxy+redirect context |
+| VPN_EGRESS_VERIFIED | Step B (or A if DNS works) returns VPN public IP; UI may show EGRESS VERIFIED when flow status is `open`/`closed` |
+| DIRECT_EGRESS_VERIFIED | Step C returns Direct public IP |
+
+Application WFP rules install only `ALE_CONNECT_REDIRECT_V4` (+ optional IPv6 TCP block). They do not filter UDP DNS.
+
 ## TEST 4 — Chrome (or any unlisted app) stays DIRECT
 
 - With Probe (or Cursor) on VPN, use Chrome to the same public site.

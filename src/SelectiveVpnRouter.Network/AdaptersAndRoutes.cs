@@ -113,6 +113,27 @@ public static class RouteTable
     public static IReadOnlyList<RouteRow> DefaultRoutes()
         => IPv4().Where(r => r.Destination.Equals(IPAddress.Any) && r.Mask.Equals(IPAddress.Any)).ToList();
 
+    public static bool Contains(IPAddress target, RouteRow row)
+    {
+        byte[] targetBytes = target.GetAddressBytes();
+        byte[] destBytes = row.Destination.GetAddressBytes();
+        byte[] maskBytes = row.Mask.GetAddressBytes();
+        if (targetBytes.Length != destBytes.Length || destBytes.Length != maskBytes.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < targetBytes.Length; i++)
+        {
+            if ((targetBytes[i] & maskBytes[i]) != (destBytes[i] & maskBytes[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public static bool TryAddOwned(OwnedRoute route, out string error)
     {
         error = "";

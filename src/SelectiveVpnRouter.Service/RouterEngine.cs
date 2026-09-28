@@ -25,6 +25,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
     private WfpPolicyDiagnostics _wfpPolicy = WfpPolicyDiagnostics.Empty;
     private CalloutDriverClient? _driver;
     private CancellationTokenSource? _loopCts;
+    private readonly CancellationTokenSource _serviceCts = new();
     private bool _paused;
     private AdapterView? _vpnAdapter;
     private AdapterView? _directAdapter;
@@ -148,7 +149,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
             VpnInterfaceName = _vpnAdapter.Name,
             BindOutboundToVpn = true,
         };
-        await _proxy.StartAsync(IPAddress.Loopback, 0, ct).ConfigureAwait(false);
+        await _proxy.StartAsync(IPAddress.Loopback, 0, _serviceCts.Token).ConfigureAwait(false);
         Log("proxy-started port=" + _proxy.Port);
 
         _driver = CalloutDriverClient.TryOpen();
@@ -299,7 +300,12 @@ public sealed partial class RouterEngine : IAsyncDisposable
     public TransparentTcpProxy? Proxy => _proxy;
     public CalloutDriverClient? Driver => _driver;
 
-    public async ValueTask DisposeAsync() => await DisconnectAsync().ConfigureAwait(false);
+    public async ValueTask DisposeAsync()
+    {
+        await DisconnectAsync().ConfigureAwait(false);
+        _serviceCts.Cancel();
+        _serviceCts.Dispose();
+    }
 
     internal void Log(string message)
     {

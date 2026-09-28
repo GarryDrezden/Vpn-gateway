@@ -25,21 +25,6 @@ function Wait-ServiceStatus {
     $svc.WaitForStatus($Status, $serviceTimeout)
 }
 
-function Start-GuiAsUser {
-    param([Parameter(Mandatory = $true)][string]$ExePath)
-    if (-not (Test-Path $ExePath)) {
-        Write-SvrResult -Outcome WARNING -Name "update-desktop" -Message "GUI exe not found: $ExePath"
-        return
-    }
-    try {
-        Start-Process -FilePath "explorer.exe" -ArgumentList "`"$ExePath`""
-        Write-SvrResult -Outcome INFO -Name "update-desktop" -Message "Started GUI via explorer.exe (non-elevated)."
-    }
-    catch {
-        Write-SvrResult -Outcome INFO -Name "update-desktop" -Message "Запустите GUI обычным пользователем: $ExePath"
-    }
-}
-
 Stop-AppIfRunning
 
 $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
@@ -75,9 +60,7 @@ Wait-ServiceStatus -Name $serviceName -Status Running
 
 $svc = Get-Service -Name $serviceName
 $startMode = (Get-CimInstance Win32_Service -Filter "Name='$serviceName'").StartMode
-Write-SvrResult -Outcome PASS -Name "service" -Message "Status=$($svc.Status); StartType=$startMode"
-Write-Host "SelectiveVpnRouter.App.exe: $appExe"
-
-& (Join-Path $PSScriptRoot "refresh-explorer-icons.ps1")
-
-Start-GuiAsUser -ExePath $appExe
+$startTypeLabel = if ($startMode -eq "Auto") { "Auto" } else { $startMode }
+Write-SvrResult -Outcome PASS -Name "service" -Message "Status=$($svc.Status); StartType=$startTypeLabel"
+Write-SvrResult -Outcome INFO -Name "GUI" -Message $appExe
+Write-SvrResult -Outcome INFO -Name "update-desktop" -Message "completed. GUI was not started automatically."

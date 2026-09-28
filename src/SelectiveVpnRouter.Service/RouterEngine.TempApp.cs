@@ -1,4 +1,6 @@
+using System.Net;
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Network;
 
 namespace SelectiveVpnRouter.Service;
 
@@ -12,6 +14,31 @@ public sealed partial class RouterEngine
         WfpPolicyDiagnostics policy = WfpPolicy;
         WfpFilterInstallResult? filter = exe is null ? null : WfpPolicyHealth.FindCalloutFilter(policy, exe);
         IReadOnlyList<FlowEvent> flows = Proxy?.Flows ?? [];
+        bool ipv6Block = Config.Vpn.Ipv6Policy is Ipv6Policy.BlockForVpnRoutedApps
+            || (Config.Vpn.Ipv6Policy is Ipv6Policy.Auto && _vpnAdapter?.Ipv6.Any(a => !a.StartsWith("fe80", StringComparison.OrdinalIgnoreCase)) != true);
+
+        IReadOnlyList<FlowEvent> matching = exe is null
+            ? []
+            : flows
+                .Where(f => string.Equals(f.ProcessPath, Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(f => f.UpdatedAt)
+                .ThenByDescending(f => f.SequenceId)
+                .ToArray();
+
+        RealAppFlowObservation? selected = matching.FirstOrDefault() is FlowEvent latest
+            ? RealAppRoutingObservation.FromFlow(latest)
+            : null;
+
+        string? routeDiagnostic = null;
+        if (selected is not null && IPAddress.TryParse(selected.Destination, out IPAddress? target))
+        {
+            routeDiagnostic = VpnRouteDiagnostics.Summarize(
+                target,
+                _vpnAdapter?.Ipv4Index,
+                _vpn?.RouteGateway,
+                _owned.Any(r => r.Reason == "vpn-transport-high-metric"));
+        }
+
         var status = new TempAppVpnStatus
         {
             Active = !string.IsNullOrWhiteSpace(exe),
@@ -21,11 +48,12 @@ public sealed partial class RouterEngine
             FilterInstalled = filter?.FilterInstalled == true,
             FilterId = filter?.FilterId ?? 0,
             Error = filter?.Error,
-            ObservationState = RealAppRoutingObservation.ComputeState(flows, exe),
-            Flows = flows
-                .Where(f => exe is not null && string.Equals(f.ProcessPath, Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase))
-                .Select(RealAppRoutingObservation.FromFlow)
-                .ToArray(),
+            QueriedAt = DateTimeOffset.UtcNow,
+            SelectedFlow = selected,
+            RecentFlows = matching.Take(10).Select(RealAppRoutingObservation.FromFlow).ToArray(),
+            ObservationState = RealAppRoutingObservation.ComputeState(selected),
+            WfpLayerAudit = WfpPolicyLayerAudit.Summary(_driver?.IsLoaded == true, ipv6Block),
+            RouteDiagnostic = routeDiagnostic,
         };
 
         return status with { Summary = RealAppRoutingObservation.BuildSummary(status) };

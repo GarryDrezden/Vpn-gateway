@@ -8,6 +8,14 @@ End-to-end TCP path is verified: Application rule → WFP ALE APP_ID → connect
 
 You still need a **built and loaded** callout (`scripts\build-driver.ps1`, `scripts\check-driver.ps1` → `\\.\SelectiveVpnCallout`). Without the driver, Application rules cannot transparently hijack TCP connects.
 
+## Application DNS / libcurl resolver
+
+Application WFP rules target **TCP connect** layers only (`ALE_CONNECT_REDIRECT_V4`, optional `ALE_AUTH_CONNECT_V6` block). They do **not** install UDP or DNS WFP filters.
+
+Some clients (notably Windows `curl.exe`) may fail name resolution with `getaddrinfo() thread failed to start` while a temp VPN rule is active, even though `Resolve-DnsName` works system-wide. This is libcurl's threaded resolver failing to start a worker thread — not proof that TCP routing is broken. Verify TCP/VPN egress with `curl --resolve` (preserves SNI/hostname, skips DNS lookup only).
+
+The kernel callout currently bypasses redirect only for `127.0.0.1:<proxyPort>` and proxy PID. Full `127.0.0.0/8` bypass in the driver is recommended if local loopback TCP must never be redirected; managed proxy also bypasses loopback destinations that reach the proxy.
+
 ## UDP / QUIC
 
 No per-process UDP routing. QUIC (UDP/443) can bypass the TCP proxy. The “Block QUIC” checkbox is persisted for a future WFP UDP/443 block; it does **not** currently install that filter. It will never block all UDP without an explicit, warned control.

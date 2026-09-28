@@ -4,30 +4,37 @@ Windows 10/11 x64 app that keeps **normal Direct internet** as the system defaul
 
 Quick scenario: **route Cursor through personal VPN while Git stays Direct.**
 
-## Milestone: per-process TCP routing verified end-to-end
+## Milestones (verified on Windows 10/11 x64)
 
-On Windows 10/11 x64, **transparent per-process TCP routing** is verified for the Probe path:
+### Milestone 1 — `per-process-routing-pass-v1`
 
-Application rule → WFP `FWPM_CONDITION_ALE_APP_ID` → `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4` → KMDF callout (`SelectiveVpnCallout.sys`) → localhost transparent proxy → WFP redirect context recovery → VPN-bound outbound socket.
+Controlled **Probe.exe** path: transparent per-process TCP routing with simultaneous Direct isolation.
 
-A simultaneous Direct process stays off the proxy and keeps Direct egress.
+Application rule → WFP `FWPM_CONDITION_ALE_APP_ID` → `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4` → KMDF callout (`SelectiveVpnCallout.sys`) → localhost transparent proxy → redirect context recovery → VPN-bound outbound socket.
 
-Git tag: `per-process-routing-pass-v1`
+### Milestone 2 — `real-app-vpn-egress-pass-v1`
 
-### Verified now
+Real external application verified: `C:\Windows\System32\curl.exe` with temporary APP_ID rule.
 
-- TCP connect-redirect for selected `.exe` processes
-- WFP ALE APP_ID filter install + callout redirect
-- Local proxy accept + redirect context recovery
-- VPN-bound outbound socket creation
-- Per-process isolation (VPN app vs Direct app at the same time)
+- HTTPS `200 OK` via `curl --resolve` (DNS bypassed for controlled test)
+- VPN public IP observed (`91.184.250.53`)
+- Same executable without rule returns Direct public IP (`83.143.157.1`)
+- Proxy flow: `vpnOutboundConnected=True`, `status=Closed`, `egressVerified=True`
+
+Full chain: curl.exe → WFP filter → callout → transparent proxy → VPN-bound outbound → TLS/HTTP → VPN egress.
+
+### Verified now (TCP IPv4)
+
+- Per-process connect-redirect for selected `.exe` processes
+- Probe isolation + real-app curl egress
+- WFP ALE APP_ID, callout redirect, proxy, redirect context, VPN-bound outbound
 
 ### Not verified yet (do not assume support)
 
 - UDP / QUIC per-process routing
-- IPv6 connect-redirect policy end-to-end
-- DNS behaviour for arbitrary apps
-- External egress IP for arbitrary GUI apps without a controlled HTTP client (use Test Center **Проверка реального приложения** and observe WFP/proxy flows; check public IP yourself in the browser)
+- IPv6 egress end-to-end
+- Arbitrary DNS behaviour for all apps (use `--resolve` or manual verification)
+- Full GUI browser acceptance without controlled HTTP client
 
 ## What this is
 

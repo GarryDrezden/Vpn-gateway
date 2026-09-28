@@ -92,9 +92,27 @@ public sealed record CrashState
     public DateTimeOffset WrittenUtc { get; init; } = DateTimeOffset.UtcNow;
 }
 
+public sealed record FlowErrorDetails
+{
+    public string Phase { get; init; } = "";
+    public string ExceptionType { get; init; } = "";
+    public string? CancellationReason { get; init; }
+    public int? TimeoutMs { get; init; }
+    public string? SocketErrorCode { get; init; }
+    public int? NativeErrorCode { get; init; }
+    public string Message { get; init; } = "";
+    public string? Destination { get; init; }
+    public int? VpnInterfaceIndex { get; init; }
+    public string? LocalBindEndpoint { get; init; }
+}
+
 public sealed record FlowEvent
 {
-    public DateTimeOffset Time { get; init; } = DateTimeOffset.UtcNow;
+    public Guid FlowId { get; init; } = Guid.NewGuid();
+    public long SequenceId { get; init; }
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset Time => UpdatedAt;
     public string ProcessPath { get; init; } = "";
     public int Pid { get; init; }
     public string Destination { get; init; } = "";
@@ -104,6 +122,15 @@ public sealed record FlowEvent
     public FlowRoute Route { get; init; }
     public string? LocalInterface { get; init; }
     public bool WfpRedirect { get; init; }
+    public bool ProxyAccepted { get; init; }
     public bool RedirectRecordsApplied { get; init; }
-    public string Status { get; init; } = "new";
+    public bool VpnOutboundCreated { get; init; }
+    public bool VpnOutboundBound { get; init; }
+    public bool VpnOutboundConnected { get; init; }
+    public string? OutboundLocalEndpoint { get; init; }
+    public string? OutboundRemoteEndpoint { get; init; }
+    public int? VpnInterfaceIndex { get; init; }
+    public string? BypassReason { get; init; }
+    public FlowErrorDetails? ErrorDetails { get; init; }
+    public string Status { get; init; } = FlowLifecycle.Accepted;
 }

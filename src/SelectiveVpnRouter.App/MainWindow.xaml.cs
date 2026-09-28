@@ -405,10 +405,25 @@ public partial class MainWindow : Window
         RealAppDetailLine.Text = status.Summary;
         switch (status.ObservationState)
         {
-            case RealAppRoutingObservation.Pass:
-                RealAppStatusLine.Text = "PASS — маршрутизация выбранного приложения наблюдается";
+            case RealAppRoutingObservation.EgressVerified:
+                RealAppStatusLine.Text = "PASS — VPN egress подтверждён (flow завершился успешно)";
                 RealAppStatusLine.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0x15, 0x80, 0x3D));
+                break;
+            case RealAppRoutingObservation.RoutingObserved:
+                RealAppStatusLine.Text = "ROUTING OBSERVED — цепочка WFP→proxy→VPN создана, egress ещё не подтверждён";
+                RealAppStatusLine.Foreground = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(0x1D, 0x4E, 0xD8));
+                break;
+            case RealAppRoutingObservation.Warning:
+                RealAppStatusLine.Text = "WARNING — VPN routing observed, но flow завершился с ошибкой";
+                RealAppStatusLine.Foreground = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(0xB4, 0x53, 0x09));
+                break;
+            case RealAppRoutingObservation.FlowError:
+                RealAppStatusLine.Text = "FLOW ERROR — ошибка proxy/outbound без полной routing-цепочки";
+                RealAppStatusLine.Foreground = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(0xB9, 0x1C, 0x1C));
                 break;
             case RealAppRoutingObservation.Partial:
                 RealAppStatusLine.Text = "Частично — WFP redirect без полной цепочки proxy/VPN";
@@ -435,14 +450,27 @@ public partial class MainWindow : Window
                 break;
         }
 
-        if (status.Flows.Count > 0)
+        if (!string.IsNullOrWhiteSpace(status.WfpLayerAudit))
         {
-            RealAppFlowObservation flow = status.Flows[0];
+            RealAppAdvancedLine.Text = policyLine + Environment.NewLine + status.WfpLayerAudit +
+                (status.Error is null ? "" : Environment.NewLine + status.Error);
+        }
+
+        RealAppFlowObservation? flow = status.SelectedFlow;
+        if (flow is not null)
+        {
+            string errorLine = flow.ErrorDetails is null
+                ? flow.Status
+                : FlowStatusHelper.FormatErrorStatus(flow.ErrorDetails);
             RealAppDetailLine.Text =
+                $"flow={flow.FlowId:N}  updated={flow.UpdatedAt:HH:mm:ss.fff}  queried={status.QueriedAt:HH:mm:ss.fff}{Environment.NewLine}" +
                 $"Process PID={flow.Pid}  dest={flow.Destination}:{flow.Port}{Environment.NewLine}" +
-                $"WFP redirected={flow.WfpRedirect}  proxy accepted={flow.ProxyAccepted}  " +
-                $"redirect context={flow.RedirectRecordsApplied}  VPN-bound outbound={flow.VpnBoundOutboundCreated}{Environment.NewLine}" +
-                $"Route={flow.Route}  local={flow.LocalInterface ?? "—"}  status={flow.Status}";
+                $"WFP redirected={flow.WfpRedirect}  proxy accepted={flow.ProxyAccepted}  redirect context={flow.RedirectRecordsApplied}{Environment.NewLine}" +
+                $"vpnOutboundCreated={flow.VpnOutboundCreated} bound={flow.VpnOutboundBound} connected={flow.VpnOutboundConnected}{Environment.NewLine}" +
+                $"Route={flow.Route}  local={flow.LocalInterface ?? "—"}  outboundLocal={flow.OutboundLocalEndpoint ?? "—"}{Environment.NewLine}" +
+                $"routingObserved={flow.RoutingObserved}  tcpConnectSuccess={flow.TcpConnectSuccess}  egressVerified={flow.EgressVerified}{Environment.NewLine}" +
+                errorLine +
+                (string.IsNullOrWhiteSpace(status.RouteDiagnostic) ? "" : Environment.NewLine + status.RouteDiagnostic);
         }
     }
 
