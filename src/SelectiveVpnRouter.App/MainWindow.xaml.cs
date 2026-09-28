@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
@@ -23,15 +24,22 @@ public partial class MainWindow : Window
     private readonly PeriodicTimer _timer = new(TimeSpan.FromSeconds(2));
     private CancellationTokenSource _cts = new();
     private bool _exit;
+    private bool _connectUiActive;
     private AppConfiguration _config = new();
 
     public MainWindow()
     {
         InitializeComponent();
+        if (LayoutDebugOptions.Enabled)
+        {
+            LayoutDebugHelper.Attach(this, RootDock);
+        }
+
         RulesGrid.ItemsSource = _rules;
         _tray.Text = "Selective VPN Router";
         _tray.Visible = true;
-        _tray.Icon = System.Drawing.SystemIcons.Shield;
+        Icon = AppIconHelper.WpfIcon;
+        _tray.Icon = AppIconHelper.CloneTrayIcon();
         _tray.DoubleClick += (_, _) => { Show(); WindowState = WindowState.Normal; Activate(); };
         _tray.ContextMenuStrip = BuildTray();
         Loaded += async (_, _) => await StartAsync();
@@ -40,21 +48,38 @@ public partial class MainWindow : Window
     private Forms.ContextMenuStrip BuildTray()
     {
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Open", null, (_, _) => { Show(); Activate(); });
-        menu.Items.Add("Start VPN", null, async (_, _) => await Call(IpcMethods.ConnectVpn));
-        menu.Items.Add("Stop VPN", null, async (_, _) => await Call(IpcMethods.DisconnectVpn));
-        menu.Items.Add("Pause routing", null, async (_, _) => await Call(IpcMethods.PauseRouting));
-        menu.Items.Add("Emergency Restore", null, async (_, _) => await Call(IpcMethods.EmergencyRestore));
-                menu.Items.Add("Exit", null, (_, _) => { _exit = true; _tray.Visible = false; System.Windows.Application.Current.Shutdown(); });
+        menu.Items.Add("Открыть", null, (_, _) => { Show(); Activate(); });
+        menu.Items.Add("Подключить VPN", null, async (_, _) => await ConnectVpnAsync());
+        menu.Items.Add("Отключить VPN", null, async (_, _) => await Call(IpcMethods.DisconnectVpn));
+        menu.Items.Add("Приостановить маршрутизацию", null, async (_, _) => await Call(IpcMethods.PauseRouting));
+        menu.Items.Add("Аварийное восстановление", null, async (_, _) => await Call(IpcMethods.EmergencyRestore));
+        menu.Items.Add("Выход", null, (_, _) => { _exit = true; _tray.Visible = false; System.Windows.Application.Current.Shutdown(); });
         return menu;
     }
 
     private async Task StartAsync()
     {
-        _config = ConfigSerializer.LoadOrDefault(AppPaths.ConfigFile);
+        _config = await LoadConfigFromServiceOrDiskAsync();
         ApplyConfigToUi(_config);
         _ = RefreshLoop();
         await RefreshAsync();
+    }
+
+    private async Task<AppConfiguration> LoadConfigFromServiceOrDiskAsync()
+    {
+        try
+        {
+            if (await _client.TryPingAsync(_cts.Token))
+            {
+                return await _client.SendOkAsync<AppConfiguration>(IpcMethods.GetConfig, null, _cts.Token)
+                    ?? new AppConfiguration();
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        return ConfigSerializer.LoadOrDefault(AppPaths.ConfigFile);
     }
 
     private async Task RefreshLoop()
@@ -71,8 +96,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RefreshAsync()
+    private async Task RefreshAsync(bool force = false)
     {
+        if (_connectUiActive && !force)
+        {
+            return;
+        }
+
         try
         {
             ServiceSnapshot? snap = await _client.SendOkAsync<ServiceSnapshot>(IpcMethods.GetStatus, null, _cts.Token);
@@ -81,17 +111,27 @@ public partial class MainWindow : Window
                 return;
             }
 
-            StatusLine.Text = snap.Vpn.Connected
-                ? $"VPN: Connected    Driver: {(snap.DriverLoaded ? "loaded" : "NOT loaded")}    Redirect: {(snap.TransparentRedirectActive ? "armed" : "inactive")}"
-                : $"VPN: Disconnected    Service: up    Driver: {(snap.DriverLoaded ? "loaded" : "NOT loaded")}";
-            IfaceLine.Text = $"Direct: {snap.DirectAdapter?.Name ?? "—"}    VPN: {snap.VpnAdapter?.Name ?? "—"} if={snap.VpnAdapter?.Ipv4Index?.ToString() ?? "—"}  preferred default if={snap.PreferredDefault?.InterfaceIndex} metric={snap.PreferredDefault?.Metric}    owned 0/0 metric={snap.OwnedTransportDefault?.Metric.ToString() ?? "—"}";
+            string vpnStatus = snap.Vpn.Connected ? "VPN: подключён" : "VPN: отключён";
+            string driverStatus = snap.DriverLoaded ? "Драйвер: загружен" : "Драйвер: не загружен";
+            if (snap.Vpn.Connected)
+            {
+                string redirectStatus = snap.TransparentRedirectActive ? "Перенаправление: включено" : "Перенаправление: выкл.";
+                StatusLine.Text = $"{vpnStatus}    {driverStatus}    {redirectStatus}";
+            }
+            else
+            {
+                StatusLine.Text = $"{vpnStatus}    Служба: работает    {driverStatus}";
+            }
+
+            IfaceLine.Text = $"Напрямую: {snap.DirectAdapter?.Name ?? "—"}    VPN: {snap.VpnAdapter?.Name ?? "—"} if={snap.VpnAdapter?.Ipv4Index?.ToString() ?? "—"}  preferred default if={snap.PreferredDefault?.InterfaceIndex} metric={snap.PreferredDefault?.Metric}    owned 0/0 metric={snap.OwnedTransportDefault?.Metric.ToString() ?? "—"}";
             FlowsGrid.ItemsSource = snap.Flows;
             LogBox.Text = string.Join(Environment.NewLine, snap.Vpn.RecentLog);
-            _tray.Text = snap.Vpn.Connected ? "Selective VPN Router — Connected" : "Selective VPN Router — Disconnected";
+            _tray.Text = snap.Vpn.Connected ? "Selective VPN Router — подключён" : "Selective VPN Router — отключён";
         }
         catch (Exception)
         {
-            StatusLine.Text = "Service: not connected. Start SelectiveVpnRouter.Service.exe as Administrator (--console or Windows Service).";
+            StatusLine.Text = "Служба Selective VPN Router не запущена.";
+            IfaceLine.Text = string.Empty;
         }
     }
 
@@ -140,19 +180,14 @@ public partial class MainWindow : Window
         };
     }
 
-    private async void OnStart(object sender, RoutedEventArgs e) => await Call(IpcMethods.ConnectVpn, new ConnectVpnRequest
-    {
-        OpenVpnPath = ExeBox.Text.Trim(),
-        ProfilePath = ProfileBox.Text.Trim(),
-        DisableDco = DcoBox.IsChecked == true,
-    });
+    private async void OnStart(object sender, RoutedEventArgs e) => await ConnectVpnAsync();
 
     private async void OnStop(object sender, RoutedEventArgs e) => await Call(IpcMethods.DisconnectVpn);
     private async void OnPause(object sender, RoutedEventArgs e) => await Call(IpcMethods.PauseRouting);
     private async void OnEmergency(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show("Remove this app's routes, WFP filters, and managed OpenVPN? Other VPNs are not touched.",
-                "Emergency restore", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+        if (MessageBox.Show("Удалить маршруты, WFP-фильтры и управляемый OpenVPN этого приложения? Другие VPN не затрагиваются.",
+                "Аварийное восстановление", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
         {
             return;
         }
@@ -162,7 +197,7 @@ public partial class MainWindow : Window
 
     private void OnAddApp(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Filter = "Programs (*.exe)|*.exe" };
+        var dlg = new OpenFileDialog { Filter = "Программы (*.exe)|*.exe" };
         if (dlg.ShowDialog() != true)
         {
             return;
@@ -173,7 +208,7 @@ public partial class MainWindow : Window
 
     private void OnAddDomain(object sender, RoutedEventArgs e)
     {
-        string? host = Prompt("Domain (example.com or *.example.com). Applies to ALL processes.", "youtube.com");
+        string? host = Prompt("Домен (example.com или *.example.com). Действует для всех процессов.", "youtube.com");
         if (string.IsNullOrWhiteSpace(host))
         {
             return;
@@ -184,7 +219,7 @@ public partial class MainWindow : Window
 
     private void OnAddCidr(object sender, RoutedEventArgs e)
     {
-        string? cidr = Prompt("IP or CIDR. Applies to ALL processes.", "1.2.3.0/24");
+        string? cidr = Prompt("IP или CIDR. Действует для всех процессов.", "1.2.3.0/24");
         if (string.IsNullOrWhiteSpace(cidr))
         {
             return;
@@ -212,7 +247,7 @@ public partial class MainWindow : Window
         }
 
         await SaveConfigAsync();
-        WizardHint.Text = "Saved. Connect VPN, then run Test Center. Add git.exe as DIRECT if Cursor should use VPN while git stays on the work network.";
+        WizardHint.Text = "Сохранено. Подключите VPN и откройте «Тестирование». Добавьте git.exe как «Напрямую», если Cursor должен идти через VPN, а git — через рабочую сеть.";
     }
 
     private void OnAddGitDirect(object sender, RoutedEventArgs e)
@@ -245,11 +280,34 @@ public partial class MainWindow : Window
 
     private void OnBrowseFirstApp(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Filter = "Programs (*.exe)|*.exe" };
+        var dlg = new OpenFileDialog { Filter = "Программы (*.exe)|*.exe" };
         if (dlg.ShowDialog() == true)
         {
             FirstAppBox.Text = dlg.FileName;
         }
+    }
+
+    private void OnClearDiagLog(object sender, RoutedEventArgs e) => DiagResults.Items.Clear();
+
+    private void OnCopyDiagLog(object sender, RoutedEventArgs e)
+    {
+        if (DiagResults.Items.Count == 0)
+        {
+            return;
+        }
+
+        string text = string.Join(Environment.NewLine, DiagResults.Items.Cast<object>().Select(i => i.ToString() ?? ""));
+        System.Windows.Clipboard.SetText(text);
+    }
+
+    private void OnCopyVpnLog(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(LogBox.Text))
+        {
+            return;
+        }
+
+        System.Windows.Clipboard.SetText(LogBox.Text);
     }
 
     private static readonly HashSet<string> ConfirmDiags =
@@ -268,11 +326,11 @@ public partial class MainWindow : Window
         if (ConfirmDiags.Contains(name))
         {
             string extra = name == "kill-service"
-                ? "This terminates the elevated service. Direct internet should keep working. Restart the service afterwards. Boot security is not changed."
-                : "This changes driver/service state only. TESTSIGNING, Secure Boot, HVCI, and BitLocker are NOT changed.";
-            if (MessageBox.Show(extra + "\n\nContinue: " + name + "?", "Confirm", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+                ? "Это завершит службу с правами администратора. Интернет «Напрямую» должен продолжить работать. После этого перезапустите службу. Параметры загрузки не меняются."
+                : "Изменяется только состояние драйвера/службы. TESTSIGNING, Secure Boot, HVCI и BitLocker НЕ меняются.";
+            if (MessageBox.Show(extra + "\n\nПродолжить: " + name + "?", "Подтверждение", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
             {
-                DiagResults.Items.Insert(0, "WARNING  " + name + ": cancelled");
+                DiagResults.Items.Insert(0, "WARNING  " + name + ": отменено");
                 return;
             }
 
@@ -296,14 +354,63 @@ public partial class MainWindow : Window
     private async Task SaveConfigAsync()
     {
         _config = ReadConfigFromUi();
+        await _client.SendOkAsync<AppConfiguration>(IpcMethods.SetConfig, _config, _cts.Token);
+    }
+
+    private ConnectVpnRequest BuildConnectVpnRequestFromUi() =>
+        new()
+        {
+            OpenVpnPath = ExeBox.Text.Trim(),
+            ProfilePath = ProfileBox.Text.Trim(),
+            DisableDco = DcoBox.IsChecked == true,
+        };
+
+    private static void LogConnectStage(string stage)
+    {
         try
         {
-            await _client.SendOkAsync<AppConfiguration>(IpcMethods.SetConfig, _config, _cts.Token);
+            Directory.CreateDirectory(AppPaths.LocalAppData);
+            string line = DateTimeOffset.Now.ToString("o") + " " + stage + Environment.NewLine;
+            File.AppendAllText(Path.Combine(AppPaths.LocalAppData, "connect.log"), line);
         }
         catch (Exception)
         {
-            Directory.CreateDirectory(AppPaths.ProgramData);
-            ConfigSerializer.Save(AppPaths.ConfigFile, _config);
+        }
+    }
+
+    private async Task ConnectVpnAsync()
+    {
+        SetConnectUiBusy(true);
+        LogConnectStage("connect-click");
+        ConnectVpnRequest request = BuildConnectVpnRequestFromUi();
+        try
+        {
+            LogConnectStage("connect-request-send exe=" + request.OpenVpnPath + " profile=" + request.ProfilePath);
+            await _client.SendOkAsync<ServiceSnapshot>(IpcMethods.ConnectVpn, request, _cts.Token);
+            LogConnectStage("connect-response ok");
+            await RefreshAsync(force: true);
+        }
+        catch (IpcTimeoutException)
+        {
+            LogConnectStage("connect-response timeout");
+            await Task.Delay(TimeSpan.FromSeconds(3), _cts.Token);
+            await RefreshAsync(force: true);
+            if (await IsVpnConnectedAsync())
+            {
+                return;
+            }
+
+            MessageBox.Show(IpcTimeoutException.ConnectVpnUserMessage, "Selective VPN Router");
+        }
+        catch (Exception ex)
+        {
+            LogConnectStage("connect-response error=" + ex.Message);
+            await RefreshAsync(force: true);
+            MessageBox.Show(ex.Message, "Selective VPN Router");
+        }
+        finally
+        {
+            SetConnectUiBusy(false);
         }
     }
 
@@ -311,13 +418,36 @@ public partial class MainWindow : Window
     {
         try
         {
-            await SaveConfigAsync();
             await _client.SendOkAsync<ServiceSnapshot>(method, payload, _cts.Token);
-            await RefreshAsync();
+            await RefreshAsync(force: true);
         }
         catch (Exception ex)
         {
             MessageBox.Show(ex.Message, "Selective VPN Router");
+        }
+    }
+
+    private async Task<bool> IsVpnConnectedAsync()
+    {
+        try
+        {
+            ServiceSnapshot? snap = await _client.SendOkAsync<ServiceSnapshot>(IpcMethods.GetStatus, null, _cts.Token);
+            return snap?.Vpn.Connected == true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private void SetConnectUiBusy(bool busy)
+    {
+        _connectUiActive = busy;
+        ConnectVpnButton.IsEnabled = !busy;
+        DisconnectVpnButton.IsEnabled = !busy;
+        if (busy)
+        {
+            StatusLine.Text = "VPN: подключение...";
         }
     }
 
@@ -362,6 +492,14 @@ public sealed class RuleRow : INotifyPropertyChanged
     public Guid Id { get; set; }
     public RuleType Type { get; set; }
     public RouteMode Mode { get; set; }
+    public string ModeDisplay => Mode == RouteMode.Direct ? "Напрямую" : "VPN";
+    public string TypeDisplay => Type switch
+    {
+        RuleType.Application => "Приложение",
+        RuleType.Domain => "Домен",
+        RuleType.Cidr => "IP/CIDR",
+        _ => Type.ToString(),
+    };
     public bool Enabled { get => _enabled; set { _enabled = value; PropertyChanged?.Invoke(this, new(nameof(Enabled))); } }
     public string Name { get => _name; set { _name = value; PropertyChanged?.Invoke(this, new(nameof(Name))); } }
     public string Target { get => _target; set { _target = value; PropertyChanged?.Invoke(this, new(nameof(Target))); } }

@@ -26,6 +26,70 @@ function Get-SvrRepoRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 }
 
+function Initialize-SvrProgramData {
+    param(
+        [string]$DataDir = (Join-Path $env:ProgramData "SelectiveVpnRouter")
+    )
+
+    foreach ($sub in @("", "logs", "runtime")) {
+        $path = if ($sub) { Join-Path $DataDir $sub } else { $DataDir }
+        New-Item -ItemType Directory -Force -Path $path | Out-Null
+    }
+
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)
+
+    $inheritance =
+        [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+
+    $fullControl =
+        [System.Security.AccessControl.FileSystemRights]::FullControl
+
+    $readExecute =
+        [System.Security.AccessControl.FileSystemRights]::ReadAndExecute
+
+    $propagation =
+        [System.Security.AccessControl.PropagationFlags]::None
+
+    $allow =
+        [System.Security.AccessControl.AccessControlType]::Allow
+
+    $systemSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
+    $administratorsSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
+    $usersSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-545")
+
+    $systemRule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+        $systemSid,
+        $fullControl,
+        $inheritance,
+        $propagation,
+        $allow
+    )
+    $acl.AddAccessRule($systemRule)
+
+    $administratorsRule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+        $administratorsSid,
+        $fullControl,
+        $inheritance,
+        $propagation,
+        $allow
+    )
+    $acl.AddAccessRule($administratorsRule)
+
+    $usersRule = [System.Security.AccessControl.FileSystemAccessRule]::new(
+        $usersSid,
+        $readExecute,
+        $inheritance,
+        $propagation,
+        $allow
+    )
+    $acl.AddAccessRule($usersRule)
+
+    Set-Acl -Path $DataDir -AclObject $acl
+    Write-SvrResult -Outcome INFO -Name "program-data" -Message "Initialized ACL on $DataDir (SYSTEM/Administrators=FullControl, Users=ReadAndExecute)"
+}
+
 function Get-SvrVsInstall {
     $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
     if (-not (Test-Path $vswhere)) {

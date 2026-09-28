@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Sockets;
@@ -21,6 +22,7 @@ public sealed class RouterEngine : IAsyncDisposable
     private OpenVpnController? _vpn;
     private TransparentTcpProxy? _proxy;
     private WfpSession? _wfp;
+    private WfpPolicyDiagnostics _wfpPolicy = WfpPolicyDiagnostics.Empty;
     private CalloutDriverClient? _driver;
     private CancellationTokenSource? _loopCts;
     private bool _paused;
@@ -36,9 +38,8 @@ public sealed class RouterEngine : IAsyncDisposable
 
     public void Load()
     {
-        Directory.CreateDirectory(AppPaths.ProgramData);
-        Directory.CreateDirectory(AppPaths.RuntimeDirectory);
-        Directory.CreateDirectory(AppPaths.LogDirectory);
+        ProgramDataStorage.EnsureConfigured();
+        ProgramDataStorage.LogStartupDiagnostics(Log);
         Config = ConfigSerializer.LoadOrDefault(AppPaths.ConfigFile);
         CrashCleanup.ReconcileStale(Log);
     }
@@ -71,6 +72,8 @@ public sealed class RouterEngine : IAsyncDisposable
             Callout = _driver is { IsLoaded: true } && _driver.TryGetStatus(out CalloutArmStatus st, out _)
                 ? st
                 : new CalloutArmStatus { DeviceOpen = _driver?.IsLoaded == true },
+            ProxyDiagnostics = proxy?.Diagnostics ?? new TransparentProxyDiagnostics(),
+            WfpPolicy = _wfpPolicy,
             Ipv6PolicyNote = DescribeIpv6(Config.Vpn.Ipv6Policy),
             UdpNote = Config.Vpn.BlockQuicForVpnApps
                 ? "Optional QUIC/UDP 443 block for VPN-routed apps is enabled (forces TCP fallback). Full UDP routing is not implemented."
@@ -80,6 +83,8 @@ public sealed class RouterEngine : IAsyncDisposable
 
     public async Task ConnectAsync(ConnectVpnRequest? request, CancellationToken ct)
     {
+        var elapsed = Stopwatch.StartNew();
+
         AppConfiguration cfg = Config;
         string exe = request?.OpenVpnPath ?? cfg.Vpn.OpenVpnPath;
         string profile = request?.ProfilePath ?? cfg.Vpn.ProfilePath;
@@ -95,13 +100,24 @@ public sealed class RouterEngine : IAsyncDisposable
         }
 
         ProfileSafety.Result safety = ProfileSafety.Scan(File.ReadAllLines(profile));
-        Log("Profile scan: dangerous local directives=" + safety.Findings.Count + " (they are ignored via --route-nopull).");
+        Log("profile-scan dangerousDirectives=" + safety.Findings.Count);
 
         await DisconnectAsync().ConfigureAwait(false);
         _beforeConnect = AdapterCatalog.All();
         _directAdapter = PickDirect(_beforeConnect);
         _vpn = new OpenVpnController();
-        await _vpn.StartAsync(exe, profile, dco, ct).ConfigureAwait(false);
+        Log("openvpn-start exe=" + exe);
+        try
+        {
+            await _vpn.StartAsync(exe, profile, dco, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log("openvpn-start-failed error=" + ex.Message);
+            throw;
+        }
+
+        Log("openvpn-started pid=" + (_vpn.Pid?.ToString() ?? "?"));
 
         AdapterView? vpnNic = null;
         for (int i = 0; i < 25 && vpnNic is null; i++)
@@ -114,6 +130,8 @@ public sealed class RouterEngine : IAsyncDisposable
         }
 
         _vpnAdapter = vpnNic ?? throw new InvalidOperationException("Could not detect OpenVPN tunnel adapter.");
+        Log("adapter-detected name=" + _vpnAdapter.Name + " ifIndex=" + (_vpnAdapter.Ipv4Index?.ToString() ?? "—"));
+
         string? gw = _vpn.RouteGateway ?? GatewayGuess.FromAdapter(_vpnAdapter);
         if (gw is null || _vpnAdapter.Ipv4Index is not int ifIndex)
         {
@@ -131,7 +149,7 @@ public sealed class RouterEngine : IAsyncDisposable
             BindOutboundToVpn = true,
         };
         await _proxy.StartAsync(IPAddress.Loopback, 0, ct).ConfigureAwait(false);
-        Log("Proxy listening on 127.0.0.1:" + _proxy.Port);
+        Log("proxy-started port=" + _proxy.Port);
 
         _driver = CalloutDriverClient.TryOpen();
         if (_driver.IsLoaded)
@@ -158,8 +176,11 @@ public sealed class RouterEngine : IAsyncDisposable
         }
 
         await RefreshPolicyAsync().ConfigureAwait(false);
+        Log("wfp-policy-applied");
+
         _loopCts = new CancellationTokenSource();
         _ = Task.Run(() => ReconcileLoop(_loopCts.Token), _loopCts.Token);
+        Log("connect-complete elapsedMs=" + elapsed.ElapsedMilliseconds);
     }
 
     public async Task DisconnectAsync()
@@ -286,15 +307,15 @@ public sealed class RouterEngine : IAsyncDisposable
         File.AppendAllText(Path.Combine(AppPaths.LogDirectory, "service.log"), line + Environment.NewLine);
     }
 
+    public WfpPolicyDiagnostics WfpPolicy
+    {
+        get { lock (_gate) return _wfpPolicy; }
+    }
+
     public async Task RefreshPolicyAsync()
     {
         AppConfiguration cfg = Config;
-        IReadOnlyList<string> vpnExes = _paused
-            ? []
-            : RuleEvaluator.VpnApplicationRules(cfg.Rules)
-                .Select(r => r.Target)
-                .Where(File.Exists)
-                .ToList();
+        IReadOnlyList<string> vpnExes = VpnApplicationPathCollector.Collect(cfg.Rules, _paused);
         Ipv6Policy ipv6 = cfg.Vpn.Ipv6Policy;
         if (ipv6 == Ipv6Policy.Auto)
         {
@@ -302,13 +323,27 @@ public sealed class RouterEngine : IAsyncDisposable
             ipv6 = vpn6 ? Ipv6Policy.VpnIfAvailable : Ipv6Policy.BlockForVpnRoutedApps;
         }
 
+        WfpPolicyApplyResult applyResult;
         try
         {
-            _wfp?.ReplaceVpnAppFilters(vpnExes, ipv6);
+            applyResult = _wfp is IWfpAppFilterInstaller installer
+                ? installer.ReplaceVpnAppFilters(vpnExes, ipv6)
+                : WfpPolicyApplyResult.NoSession(vpnExes);
         }
         catch (Exception ex)
         {
-            Log("WFP filter update: " + ex.Message);
+            applyResult = WfpPolicyApplyResult.FromException(vpnExes, ex.Message);
+            Log("WFP filter update failed: " + ex.Message);
+        }
+
+        lock (_gate)
+        {
+            _wfpPolicy = WfpPolicyDiagnostics.FromApply(applyResult, vpnExes);
+        }
+
+        if (!applyResult.PolicyHealthy)
+        {
+            Log("WFP policy unhealthy: " + (applyResult.LastError ?? "unknown"));
         }
 
         if (_vpnAdapter?.Ipv4Index is int ifIndex)

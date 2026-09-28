@@ -2,7 +2,7 @@
 
 ## Service: not connected
 
-Start `SelectiveVpnRouter.Service.exe --console` **as Administrator**, or install the Windows Service (`scripts\install-service.ps1`). The GUI talks over `\\.\pipe\SelectiveVpnRouter`.
+Install and start the Windows Service (`scripts\publish-desktop.ps1`, then elevated `scripts\install-service.ps1`). For development only: `SelectiveVpnRouter.Service.exe --console` as Administrator. See [DESKTOP_LAUNCH.md](DESKTOP_LAUNCH.md). The GUI talks over `\\.\pipe\SelectiveVpnRouter`. If the service is down, the GUI shows: **Служба Selective VPN Router не запущена.**
 
 ## OpenVPN exits immediately / AUTH
 

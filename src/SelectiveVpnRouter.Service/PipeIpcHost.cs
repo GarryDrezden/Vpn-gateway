@@ -11,6 +11,7 @@ namespace SelectiveVpnRouter.Service;
 public sealed class PipeIpcHost : BackgroundService
 {
     private readonly RouterEngine _engine;
+    private readonly SemaphoreSlim _connectGate = new(1, 1);
 
     public PipeIpcHost(RouterEngine engine) => _engine = engine;
 
@@ -19,20 +20,41 @@ public sealed class PipeIpcHost : BackgroundService
         _engine.Load();
         while (!stoppingToken.IsCancellationRequested)
         {
-            using NamedPipeServerStream pipe = CreatePipe();
+            NamedPipeServerStream pipe = CreatePipe();
             try
             {
                 await pipe.WaitForConnectionAsync(stoppingToken).ConfigureAwait(false);
-                await ServeClientAsync(pipe, stoppingToken).ConfigureAwait(false);
+                _ = ServeClientSafeAsync(pipe, stoppingToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                pipe.Dispose();
                 return;
             }
             catch (Exception ex)
             {
-                _engine.Log("IPC: " + ex.Message);
+                pipe.Dispose();
+                _engine.Log("IPC accept: " + ex.Message);
             }
+        }
+    }
+
+    private async Task ServeClientSafeAsync(NamedPipeServerStream pipe, CancellationToken ct)
+    {
+        try
+        {
+            await ServeClientAsync(pipe, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _engine.Log("IPC client: " + ex.Message);
+        }
+        finally
+        {
+            pipe.Dispose();
         }
     }
 
@@ -115,11 +137,27 @@ public sealed class PipeIpcHost : BackgroundService
 
     private async Task<string> Connect(string? json, CancellationToken ct)
     {
-        ConnectVpnRequest? req = string.IsNullOrWhiteSpace(json)
-            ? null
-            : JsonSerializer.Deserialize<ConnectVpnRequest>(json, ConfigSerializer.JsonOptions);
-        await _engine.ConnectAsync(req, ct).ConfigureAwait(false);
-        return JsonSerializer.Serialize(_engine.Snapshot(), ConfigSerializer.JsonOptions);
+        if (!await _connectGate.WaitAsync(0, ct).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException("VPN connect is already in progress.");
+        }
+
+        try
+        {
+            ConnectVpnRequest? req = string.IsNullOrWhiteSpace(json)
+                ? null
+                : JsonSerializer.Deserialize<ConnectVpnRequest>(json, ConfigSerializer.JsonOptions);
+            string exe = req?.OpenVpnPath ?? _engine.Config.Vpn.OpenVpnPath;
+            string profile = req?.ProfilePath ?? _engine.Config.Vpn.ProfilePath;
+            _engine.Log("connect-request-received exe=" + exe + " profile=" + profile
+                + " disableDco=" + (req?.DisableDco ?? _engine.Config.Vpn.CompatibilityDisableDco));
+            await _engine.ConnectAsync(req, ct).ConfigureAwait(false);
+            return JsonSerializer.Serialize(_engine.Snapshot(), ConfigSerializer.JsonOptions);
+        }
+        finally
+        {
+            _connectGate.Release();
+        }
     }
 
     private async Task<string> Disconnect()

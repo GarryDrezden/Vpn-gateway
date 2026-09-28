@@ -7,6 +7,10 @@ volatile BOOLEAN gEnabled = FALSE;
 UINT32 gCalloutId = 0;
 HANDLE gRedirectHandle = NULL;
 volatile LONG gRedirects = 0;
+volatile LONG gRedirectAttempts = 0;
+volatile LONG gRedirectApplySuccess = 0;
+volatile LONG gRedirectApplyFailures = 0;
+volatile LONG gLastRedirectApplyStatus = 0;
 
 static WDFDEVICE gDevice = NULL;
 
@@ -86,7 +90,11 @@ VOID SvrEvtIoDeviceControl(
                 out->Enabled = gEnabled ? 1 : 0;
                 out->CalloutId = gCalloutId;
                 out->OpenHandles = (UINT32)gOpenHandles;
-                out->Redirects = (UINT32)gRedirects;
+                out->Redirects = (UINT32)gRedirectApplySuccess;
+                out->RedirectAttempts = (UINT32)gRedirectAttempts;
+                out->RedirectApplySuccess = (UINT32)gRedirectApplySuccess;
+                out->RedirectApplyFailures = (UINT32)gRedirectApplyFailures;
+                out->LastRedirectApplyStatus = (INT32)gLastRedirectApplyStatus;
                 written = sizeof(SVR_STATUS);
             }
         }

@@ -194,22 +194,124 @@ public class RouteReconcilerTests
     }
 }
 
+public class ConnectVpnRegressionTests
+{
+    private static string MainWindowSourcePath()
+    {
+        string? repoRoot = FindRepoRoot();
+        Assert.NotNull(repoRoot);
+        return Path.Combine(repoRoot, "src", "SelectiveVpnRouter.App", "MainWindow.xaml.cs");
+    }
+
+    private static string? FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "SelectiveVpnRouter.sln")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        return null;
+    }
+
+    [Fact]
+    public void ConnectVpnAsync_does_not_save_config_before_connect()
+    {
+        string text = File.ReadAllText(MainWindowSourcePath());
+        int start = text.IndexOf("private async Task ConnectVpnAsync()", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        int end = text.IndexOf("private async Task Call(", start, StringComparison.Ordinal);
+        Assert.True(end > start);
+        string body = text[start..end];
+        Assert.DoesNotContain("SaveConfigAsync", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetConfig", body, StringComparison.Ordinal);
+        Assert.Contains("IpcMethods.ConnectVpn", body, StringComparison.Ordinal);
+        Assert.Contains("ConnectVpnRequest", body, StringComparison.Ordinal);
+        Assert.Contains("BuildConnectVpnRequestFromUi", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Call_does_not_save_config()
+    {
+        string text = File.ReadAllText(MainWindowSourcePath());
+        int start = text.IndexOf("private async Task Call(", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        int end = text.IndexOf("private async Task<bool> IsVpnConnectedAsync", start, StringComparison.Ordinal);
+        Assert.True(end > start);
+        string body = text[start..end];
+        Assert.DoesNotContain("SaveConfigAsync", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConnectVpnRequest_maps_ui_fields_in_source()
+    {
+        string text = File.ReadAllText(MainWindowSourcePath());
+        Assert.Contains("OpenVpnPath = ExeBox.Text.Trim()", text, StringComparison.Ordinal);
+        Assert.Contains("ProfilePath = ProfileBox.Text.Trim()", text, StringComparison.Ordinal);
+        Assert.Contains("DisableDco = DcoBox.IsChecked == true", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RouterEngine_uses_connect_request_values()
+    {
+        string path = Path.Combine(FindRepoRoot()!, "src", "SelectiveVpnRouter.Service", "RouterEngine.cs");
+        string text = File.ReadAllText(path);
+        Assert.Contains("request?.OpenVpnPath", text, StringComparison.Ordinal);
+        Assert.Contains("request?.ProfilePath", text, StringComparison.Ordinal);
+        Assert.Contains("request?.DisableDco", text, StringComparison.Ordinal);
+    }
+}
+
+public class IpcTimeoutTests
+{
+    [Fact]
+    public void ConnectVpn_uses_long_timeout()
+    {
+        Assert.Equal(90_000, IpcTimeouts.OperationTimeoutMs(IpcMethods.ConnectVpn));
+    }
+
+    [Fact]
+    public void GetStatus_uses_short_timeout()
+    {
+        Assert.Equal(15_000, IpcTimeouts.OperationTimeoutMs(IpcMethods.GetStatus));
+    }
+
+    [Fact]
+    public void RunDiagnostic_uses_long_timeout()
+    {
+        Assert.Equal(60_000, IpcTimeouts.OperationTimeoutMs(IpcMethods.RunDiagnostic));
+    }
+}
+
 public class ConfigTests
 {
+    private static string CreateTempConfigDir()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "svr-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static AppConfiguration SampleConfig() =>
+        new()
+        {
+            Vpn = new VpnProfileSettings { ProfilePath = @"D:\vpn\a.ovpn", CompatibilityDisableDco = true },
+            Rules = [RoutingRule.Create(RuleType.Application, "c", @"C:\Cursor.exe", RouteMode.Vpn)],
+        };
+
     [Fact]
     public void Roundtrips_configuration()
     {
-        string dir = Path.Combine(Path.GetTempPath(), "svr-test-" + Guid.NewGuid());
-        Directory.CreateDirectory(dir);
+        string dir = CreateTempConfigDir();
         try
         {
             string path = Path.Combine(dir, "config.json");
-            var cfg = new AppConfiguration
-            {
-                Vpn = new VpnProfileSettings { ProfilePath = @"D:\vpn\a.ovpn", CompatibilityDisableDco = true },
-                Rules = [RoutingRule.Create(RuleType.Application, "c", @"C:\Cursor.exe", RouteMode.Vpn)],
-            };
-            ConfigSerializer.Save(path, cfg);
+            ConfigSerializer.Save(path, SampleConfig());
             AppConfiguration loaded = ConfigSerializer.LoadOrDefault(path);
             Assert.True(loaded.Vpn.CompatibilityDisableDco);
             Assert.Single(loaded.Rules);
@@ -219,6 +321,118 @@ public class ConfigTests
         {
             Directory.Delete(dir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void Save_creates_config_json()
+    {
+        string dir = CreateTempConfigDir();
+        try
+        {
+            string path = Path.Combine(dir, "config.json");
+            ConfigSerializer.Save(path, SampleConfig());
+            Assert.True(File.Exists(path));
+            Assert.False(File.Exists(path + ".tmp"));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Second_save_creates_and_updates_backup()
+    {
+        string dir = CreateTempConfigDir();
+        try
+        {
+            string path = Path.Combine(dir, "config.json");
+            string backup = Path.Combine(dir, "config.bak.json");
+            ConfigSerializer.Save(path, SampleConfig());
+            ConfigSerializer.Save(path, SampleConfig() with
+            {
+                Vpn = new VpnProfileSettings { ProfilePath = @"D:\vpn\b.ovpn" },
+            });
+
+            Assert.True(File.Exists(backup));
+            AppConfiguration backupConfig = ConfigSerializer.LoadOrDefault(backup);
+            Assert.Equal(@"D:\vpn\a.ovpn", backupConfig.Vpn.ProfilePath);
+            AppConfiguration current = ConfigSerializer.LoadOrDefault(path);
+            Assert.Equal(@"D:\vpn\b.ovpn", current.Vpn.ProfilePath);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Readonly_backup_does_not_block_save()
+    {
+        string dir = CreateTempConfigDir();
+        try
+        {
+            string path = Path.Combine(dir, "config.json");
+            string backup = Path.Combine(dir, "config.bak.json");
+            ConfigSerializer.Save(path, SampleConfig());
+            ConfigSerializer.Save(path, SampleConfig() with
+            {
+                Vpn = new VpnProfileSettings { ProfilePath = @"D:\vpn\b.ovpn" },
+            });
+            Assert.True(File.Exists(backup));
+            File.SetAttributes(backup, FileAttributes.ReadOnly);
+
+            ConfigSerializer.Save(path, SampleConfig() with
+            {
+                Vpn = new VpnProfileSettings { ProfilePath = @"D:\vpn\c.ovpn" },
+            });
+
+            Assert.Equal(@"D:\vpn\c.ovpn", ConfigSerializer.LoadOrDefault(path).Vpn.ProfilePath);
+            Assert.False(File.Exists(path + ".tmp"));
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+            {
+                foreach (string file in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                {
+                    File.SetAttributes(file, FileAttributes.Normal);
+                }
+
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void App_project_does_not_call_ConfigSerializer_Save()
+    {
+        string? repoRoot = FindRepoRoot();
+        Assert.NotNull(repoRoot);
+        string appDir = Path.Combine(repoRoot, "src", "SelectiveVpnRouter.App");
+        Assert.True(Directory.Exists(appDir));
+
+        foreach (string file in Directory.EnumerateFiles(appDir, "*.cs", SearchOption.AllDirectories))
+        {
+            string text = File.ReadAllText(file);
+            Assert.DoesNotContain("ConfigSerializer.Save", text, StringComparison.Ordinal);
+        }
+    }
+
+    private static string? FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "SelectiveVpnRouter.sln")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        return null;
     }
 }
 

@@ -81,6 +81,10 @@ public sealed class CalloutDriverClient : IDisposable
                 CalloutId = buf.CalloutId,
                 OpenHandles = buf.OpenHandles,
                 Redirects = buf.Redirects,
+                RedirectAttempts = buf.RedirectAttempts,
+                RedirectApplySuccess = buf.RedirectApplySuccess,
+                RedirectApplyFailures = buf.RedirectApplyFailures,
+                LastRedirectApplyStatus = buf.LastRedirectApplyStatus,
             };
             return true;
         }
@@ -139,6 +143,10 @@ public sealed class CalloutDriverClient : IDisposable
         public uint CalloutId;
         public uint OpenHandles;
         public uint Redirects;
+        public uint RedirectAttempts;
+        public uint RedirectApplySuccess;
+        public uint RedirectApplyFailures;
+        public int LastRedirectApplyStatus;
     }
 
     private static class Native

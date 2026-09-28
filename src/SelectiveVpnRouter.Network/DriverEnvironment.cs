@@ -137,6 +137,7 @@ public static class DriverEnvironment
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
+            ProcessOutputEncoding.UseConsoleEncoding(psi);
             using var p = Process.Start(psi);
             if (p is null)
             {

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using SelectiveVpnRouter.Core;
+using static SelectiveVpnRouter.Network.WfpNativeTypes;
 
 namespace SelectiveVpnRouter.Network;
 
@@ -10,18 +11,26 @@ namespace SelectiveVpnRouter.Network;
 /// optional callout filters when the KMDF driver is loaded.
 /// Connect redirect classify lives in kernel; this class only adds/removes objects.
 /// </summary>
-public sealed class WfpSession : IDisposable
+public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
 {
     public static readonly Guid ProviderKey = new("6b3d1f8a-7c2e-4b91-9e44-a1f0c3d5e607");
     public static readonly Guid SublayerKey = new("6b3d1f8a-7c2e-4b91-9e44-a1f0c3d5e608");
     public static readonly Guid CalloutV4Key = new("6b3d1f8a-7c2e-4b91-9e44-a1f0c3d5e609");
     public static readonly Guid LayerConnectRedirectV4 = new("c6e63c8c-b784-4562-aa7d-0a67cfcaf9a3");
-    public static readonly Guid LayerAuthConnectV6 = new("4a72393b-319f-44bc-84c3-ba54dcb3b6b4");
-    public static readonly Guid ConditionAleAppId = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
+    public static readonly Guid LayerAuthConnectV6 = WfpConstants.LayerAleAuthConnectV6;
+    public static readonly Guid ConditionAleAppId = WfpConstants.ConditionAleAppId;
 
     private IntPtr _engine;
     private readonly List<Guid> _filters = [];
     private bool _driverPresent;
+
+    static WfpSession()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            WfpAbiVerification.ThrowIfMismatch();
+        }
+    }
 
     public bool DriverPresent => _driverPresent;
 
@@ -42,21 +51,49 @@ public sealed class WfpSession : IDisposable
         }
     }
 
-    public void ReplaceVpnAppFilters(IReadOnlyList<string> exePaths, Ipv6Policy ipv6)
+    public WfpPolicyApplyResult ReplaceVpnAppFilters(IReadOnlyList<string> exePaths, Ipv6Policy ipv6)
     {
         ClearFilters();
+        var results = new List<WfpFilterInstallResult>();
         foreach (string exe in exePaths)
         {
+            string fullPath = Path.GetFullPath(exe);
             if (_driverPresent)
             {
-                TryAddAppCalloutFilter(exe);
+                results.Add(InstallAppCalloutFilter(fullPath));
             }
 
             if (ipv6 is Ipv6Policy.BlockForVpnRoutedApps)
             {
-                TryAddIpv6Block(exe);
+                results.Add(InstallIpv6BlockFilter(fullPath));
             }
         }
+
+        int installed = results.Count(r => r.IsCalloutFilter && r.FilterInstalled);
+        var apply = new WfpPolicyApplyResult
+        {
+            Filters = results,
+            RequestedVpnApps = exePaths.Count,
+            InstalledAppFilters = installed,
+            DriverPresent = _driverPresent,
+            SessionOpen = _engine != IntPtr.Zero,
+            PolicyHealthy = exePaths.Count == 0 || installed >= exePaths.Count,
+            LastError = BuildLastError(exePaths.Count, installed, results),
+        };
+        return apply;
+    }
+
+    private static string? BuildLastError(int requested, int installed, IReadOnlyList<WfpFilterInstallResult> results)
+    {
+        if (requested == 0 || installed >= requested)
+        {
+            return null;
+        }
+
+        WfpFilterInstallResult? failed = results.FirstOrDefault(r => r.IsCalloutFilter && !r.FilterInstalled);
+        return failed is null
+            ? $"Installed {installed}/{requested} callout app filters."
+            : WfpPolicyHealth.FormatFilterLine(failed);
     }
 
     public void ClearFilters()
@@ -122,261 +159,190 @@ public sealed class WfpSession : IDisposable
         return st == 0 || st == 0x80320016; // already exists
     }
 
-    private void TryAddAppCalloutFilter(string exe)
+    private WfpFilterInstallResult InstallAppCalloutFilter(string fullPath)
+        => InstallAppFilter(
+            fullPath,
+            LayerConnectRedirectV4,
+            new FWPM_ACTION0
+            {
+                type = FWP_ACTION_TYPE.FWP_ACTION_CALLOUT_UNKNOWN,
+                value = new FWPM_ACTION0_UNION { calloutKey = CalloutV4Key },
+            },
+            "SVR app redirect ",
+            "Per-process TCP redirect",
+            isCalloutFilter: true);
+
+    private WfpFilterInstallResult InstallIpv6BlockFilter(string fullPath)
+        => InstallAppFilter(
+            fullPath,
+            LayerAuthConnectV6,
+            new FWPM_ACTION0
+            {
+                type = FWP_ACTION_TYPE.FWP_ACTION_BLOCK,
+                value = new FWPM_ACTION0_UNION { filterType = Guid.Empty },
+            },
+            "SVR IPv6 block ",
+            "Prevent IPv6 leak for VPN-routed app",
+            isCalloutFilter: false);
+
+    private WfpFilterInstallResult InstallAppFilter(
+        string fullPath,
+        Guid layer,
+        FWPM_ACTION0 action,
+        string namePrefix,
+        string description,
+        bool isCalloutFilter)
     {
-        if (!TryAppId(exe, out FWP_BYTE_BLOB blob, out IntPtr alloc))
+        if (!File.Exists(fullPath))
         {
-            return;
+            return new WfpFilterInstallResult
+            {
+                ExePath = fullPath,
+                FileExists = false,
+                IsCalloutFilter = isCalloutFilter,
+                Error = "File not found.",
+            };
+        }
+
+        IntPtr appIdPtr = IntPtr.Zero;
+        uint appIdStatus = Native.FwpmGetAppIdFromFileName0(fullPath, out appIdPtr);
+        if (appIdStatus != 0 || appIdPtr == IntPtr.Zero)
+        {
+            return new WfpFilterInstallResult
+            {
+                ExePath = fullPath,
+                FileExists = true,
+                AppIdResolved = false,
+                AppIdStatus = appIdStatus,
+                IsCalloutFilter = isCalloutFilter,
+                Error = "FwpmGetAppIdFromFileName0 failed.",
+            };
         }
 
         try
         {
-            Guid id = Guid.NewGuid();
-            Guid layer = LayerConnectRedirectV4;
-            Guid callout = CalloutV4Key;
-            Guid sub = SublayerKey;
-            var cond = new FWPM_FILTER_CONDITION0
+            var seed = new WfpFilterInstallResult
             {
-                fieldKey = ConditionAleAppId,
-                matchType = 0, // FWP_MATCH_EQUAL
-                conditionValue = new FWP_CONDITION_VALUE0 { type = 0x100 /*FWP_BYTE_BLOB_TYPE*/, value = alloc },
+                ExePath = fullPath,
+                FileExists = true,
+                AppIdResolved = true,
+                AppIdStatus = appIdStatus,
+                IsCalloutFilter = isCalloutFilter,
             };
-            var filter = new FWPM_FILTER0
-            {
-                filterKey = id,
-                displayData = new FWPM_DISPLAY_DATA0 { name = "SVR app redirect " + Path.GetFileName(exe), description = "Per-process TCP redirect" },
-                layerKey = layer,
-                subLayerKey = sub,
-                action = new FWPM_ACTION0 { type = 0x00004005 /* FWP_ACTION_CALLOUT_UNKNOWN */ , filterType = callout },
-                numFilterConditions = 1,
-                filterCondition = IntPtr.Zero,
-                weight = new FWP_VALUE0 { type = 0 },
-            };
-            IntPtr condMem = Marshal.AllocHGlobal(Marshal.SizeOf<FWPM_FILTER_CONDITION0>());
-            Marshal.StructureToPtr(cond, condMem, false);
-            filter.filterCondition = condMem;
-            uint st = Native.FwpmFilterAdd0(_engine, ref filter, IntPtr.Zero, out _);
-            Marshal.FreeHGlobal(condMem);
-            if (st == 0)
-            {
-                _filters.Add(id);
-            }
+            return AddFilter(fullPath, layer, action, namePrefix, description, appIdPtr, isCalloutFilter, seed);
         }
         finally
         {
-            if (alloc != IntPtr.Zero)
-            {
-                Native.FwpmFreeMemory0(ref alloc);
-            }
+            Native.FwpmFreeMemory0(ref appIdPtr);
         }
-
-        _ = blob;
     }
 
-    private void TryAddIpv6Block(string exe)
+    private WfpFilterInstallResult AddFilter(
+        string fullPath,
+        Guid layer,
+        FWPM_ACTION0 action,
+        string namePrefix,
+        string description,
+        IntPtr appIdBlobPtr,
+        bool isCalloutFilter,
+        WfpFilterInstallResult seed)
     {
-        if (!TryAppId(exe, out _, out IntPtr alloc))
-        {
-            return;
-        }
-
+        Guid filterKey = Guid.NewGuid();
+        IntPtr condMem = IntPtr.Zero;
+        IntPtr providerKeyPtr = IntPtr.Zero;
+        IntPtr filterMem = IntPtr.Zero;
         try
         {
-            Guid id = Guid.NewGuid();
-            Guid layer = LayerAuthConnectV6;
-            Guid sub = SublayerKey;
+            var conditionValue = FWP_CONDITION_VALUE0.FromByteBlobPointer(appIdBlobPtr);
+            WfpAppIdConditionValidation validation = WfpAppIdConditionDiagnostics.ValidateAppIdCondition(
+                ConditionAleAppId,
+                (uint)FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+                (uint)conditionValue.type,
+                appIdBlobPtr);
+            if (!validation.IsValid)
+            {
+                return seed with
+                {
+                    FilterInstalled = false,
+                    FilterAddStatus = 0,
+                    Error = validation.Error + " " + validation.DiagnosticLine,
+                };
+            }
+
             var cond = new FWPM_FILTER_CONDITION0
             {
                 fieldKey = ConditionAleAppId,
-                matchType = 0,
-                conditionValue = new FWP_CONDITION_VALUE0 { type = 0x100, value = alloc },
+                matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+                conditionValue = conditionValue,
             };
-            var filter = new FWPM_FILTER0
-            {
-                filterKey = id,
-                displayData = new FWPM_DISPLAY_DATA0 { name = "SVR IPv6 block " + Path.GetFileName(exe), description = "Prevent IPv6 leak for VPN-routed app" },
-                layerKey = layer,
-                subLayerKey = sub,
-                action = new FWPM_ACTION0 { type = 0x00001001 /* FWP_ACTION_BLOCK */ },
-                numFilterConditions = 1,
-                weight = new FWP_VALUE0 { type = 0 },
-            };
-            IntPtr condMem = Marshal.AllocHGlobal(Marshal.SizeOf<FWPM_FILTER_CONDITION0>());
+            condMem = Marshal.AllocHGlobal(Marshal.SizeOf<FWPM_FILTER_CONDITION0>());
             Marshal.StructureToPtr(cond, condMem, false);
-            filter.filterCondition = condMem;
-            uint st = Native.FwpmFilterAdd0(_engine, ref filter, IntPtr.Zero, out _);
-            Marshal.FreeHGlobal(condMem);
-            if (st == 0)
+
+            providerKeyPtr = Marshal.AllocHGlobal(Marshal.SizeOf<Guid>());
+            Marshal.StructureToPtr(ProviderKey, providerKeyPtr, false);
+
+            var filter = default(FWPM_FILTER0);
+            filter.filterKey = filterKey;
+            filter.displayData = new FWPM_DISPLAY_DATA0
             {
-                _filters.Add(id);
+                name = namePrefix + Path.GetFileName(fullPath),
+                description = description,
+            };
+            filter.providerKey = providerKeyPtr;
+            filter.layerKey = layer;
+            filter.subLayerKey = SublayerKey;
+            filter.action = action;
+            filter.numFilterConditions = 1;
+            filter.filterCondition = condMem;
+            filter.weight = FWP_VALUE0.Empty;
+
+            filterMem = Marshal.AllocHGlobal(Marshal.SizeOf<FWPM_FILTER0>());
+            Marshal.StructureToPtr(filter, filterMem, false);
+
+            uint filterAddStatus = Native.FwpmFilterAdd0(_engine, filterMem, IntPtr.Zero, out ulong filterId);
+            bool installed = filterAddStatus == 0 && filterId != 0;
+            if (installed)
+            {
+                _filters.Add(filterKey);
             }
+
+            string? error = installed
+                ? null
+                : "FwpmFilterAdd0 failed: " + WfpNativeStatus.Describe(filterAddStatus) + " " + validation.DiagnosticLine;
+
+            return seed with
+            {
+                AppIdResolved = true,
+                FilterInstalled = installed,
+                FilterAddStatus = filterAddStatus,
+                FilterId = filterId,
+                IsCalloutFilter = isCalloutFilter,
+                Error = error,
+            };
         }
         finally
         {
-            Native.FwpmFreeMemory0(ref alloc);
+            if (filterMem != IntPtr.Zero)
+            {
+                Marshal.DestroyStructure<FWPM_FILTER0>(filterMem);
+                Marshal.FreeHGlobal(filterMem);
+            }
+
+            if (condMem != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(condMem);
+            }
+
+            if (providerKeyPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(providerKeyPtr);
+            }
         }
-    }
-
-    private bool TryAppId(string exe, out FWP_BYTE_BLOB blob, out IntPtr alloc)
-    {
-        blob = default;
-        alloc = IntPtr.Zero;
-        uint st = Native.FwpmGetAppIdFromFileName0(exe, out alloc);
-        return st == 0 && alloc != IntPtr.Zero;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct FWPM_DISPLAY_DATA0
-    {
-        [MarshalAs(UnmanagedType.LPWStr)] public string name;
-        [MarshalAs(UnmanagedType.LPWStr)] public string description;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWPM_SESSION0
-    {
-        public Guid sessionKey;
-        public FWPM_DISPLAY_DATA0 displayData;
-        public uint flags;
-        public uint txnWaitTimeoutInMSec;
-        public int processId;
-        public IntPtr sid;
-        [MarshalAs(UnmanagedType.LPWStr)] public string? username;
-        [MarshalAs(UnmanagedType.Bool)] public bool kernelMode;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWPM_PROVIDER0
-    {
-        public Guid providerKey;
-        public FWPM_DISPLAY_DATA0 displayData;
-        public uint flags;
-        public FWP_BYTE_BLOB providerData;
-        [MarshalAs(UnmanagedType.LPWStr)] public string? serviceName;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWPM_SUBLAYER0
-    {
-        public Guid subLayerKey;
-        public FWPM_DISPLAY_DATA0 displayData;
-        public uint flags;
-        public IntPtr providerKey;
-        public FWP_BYTE_BLOB providerData;
-        public ushort weight;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWPM_CALLOUT0
-    {
-        public Guid calloutKey;
-        public FWPM_DISPLAY_DATA0 displayData;
-        public uint flags;
-        public IntPtr providerKey;
-        public FWP_BYTE_BLOB providerData;
-        public Guid applicableLayer;
-        public uint calloutId;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWP_BYTE_BLOB
-    {
-        public uint size;
-        public IntPtr data;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWP_VALUE0
-    {
-        public uint type;
-        public uint pad;
-        public IntPtr value0;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWP_CONDITION_VALUE0
-    {
-        public uint type;
-        public uint pad;
-        public IntPtr value;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWPM_FILTER_CONDITION0
-    {
-        public Guid fieldKey;
-        public uint matchType;
-        public FWP_CONDITION_VALUE0 conditionValue;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWPM_ACTION0
-    {
-        public uint type;
-        public Guid filterType;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FWPM_FILTER0
-    {
-        public Guid filterKey;
-        public FWPM_DISPLAY_DATA0 displayData;
-        public uint flags;
-        public IntPtr providerKey;
-        public FWP_BYTE_BLOB providerData;
-        public Guid layerKey;
-        public Guid subLayerKey;
-        public FWP_VALUE0 weight;
-        public uint numFilterConditions;
-        public IntPtr filterCondition;
-        public FWPM_ACTION0 action;
-        public ulong rawContext;
-        public Guid reserved;
-        public ulong filterId;
-        public FWP_VALUE0 effectiveWeight;
-    }
-
-    private static class Native
-    {
-        [DllImport("fwpuclnt.dll", CharSet = CharSet.Unicode)]
-        public static extern uint FwpmEngineOpen0(string? serverName, uint authnService, IntPtr authIdentity, ref FWPM_SESSION0 session, out IntPtr engine);
-
-        [DllImport("fwpuclnt.dll")]
-        public static extern uint FwpmEngineClose0(IntPtr engine);
-
-        [DllImport("fwpuclnt.dll")]
-        public static extern uint FwpmProviderAdd0(IntPtr engine, ref FWPM_PROVIDER0 provider, IntPtr sd);
-
-        [DllImport("fwpuclnt.dll")]
-        public static extern uint FwpmSubLayerAdd0(IntPtr engine, ref FWPM_SUBLAYER0 sub, IntPtr sd);
-
-        [DllImport("fwpuclnt.dll")]
-        public static extern uint FwpmCalloutAdd0(IntPtr engine, ref FWPM_CALLOUT0 callout, IntPtr sd, out uint id);
-
-        [DllImport("fwpuclnt.dll")]
-        public static extern uint FwpmFilterAdd0(IntPtr engine, ref FWPM_FILTER0 filter, IntPtr sd, out ulong id);
-
-        [DllImport("fwpuclnt.dll")]
-        public static extern uint FwpmFilterDeleteByKey0(IntPtr engine, ref Guid key);
-
-        [DllImport("fwpuclnt.dll", CharSet = CharSet.Unicode)]
-        public static extern uint FwpmGetAppIdFromFileName0(string fileName, out IntPtr appId);
-
-        [DllImport("fwpuclnt.dll")]
-        public static extern void FwpmFreeMemory0(ref IntPtr p);
     }
 }
 
 public static class WfpRedirectSockets
 {
-    private const int SioQueryRecords = unchecked((int)0x980000DC); // _WSAIOW(IOC_VENDOR, 220) computed below
-    private const int SioQueryContext = unchecked((int)0x980000DD);
-    private const int SioSetRecords = unchecked((int)0x980000DE);
-
-    // IOC_VENDOR=0x18000000, _WSAIOW = IOC_IN|IOC_VENDOR|code. IOC_IN=0x80000000
-    // SIO_QUERY_WFP_CONNECTION_REDIRECT_RECORDS = 0x980000DC (220)
-    // We'll use IOControlCode from mstcpip: 0x80000000 | 0x18000000 | 220 = 0x980000DC
-
     public static byte[] QueryRedirectRecords(Socket accepted)
     {
         byte[] buf = new byte[2048];
@@ -430,7 +396,6 @@ public static class WfpRedirectSockets
             return false;
         }
 
-        // Our driver writes: uint ipv4 (network), ushort port (network), pad
         uint addr = BitConverter.ToUInt32(context, 0);
         ushort portN = BitConverter.ToUInt16(context, 4);
         var ip = new IPAddress(BitConverter.GetBytes(addr));

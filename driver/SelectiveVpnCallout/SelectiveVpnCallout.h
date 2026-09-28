@@ -36,7 +36,11 @@ typedef struct _SVR_STATUS {
     UINT16 Enabled;
     UINT32 CalloutId;
     UINT32 OpenHandles;
-    UINT32 Redirects;
+    UINT32 Redirects; /* legacy: same as RedirectApplySuccess */
+    UINT32 RedirectAttempts;
+    UINT32 RedirectApplySuccess;
+    UINT32 RedirectApplyFailures;
+    INT32 LastRedirectApplyStatus;
 } SVR_STATUS;
 
 typedef struct _SVR_REDIRECT_CONTEXT {
@@ -52,6 +56,10 @@ extern volatile BOOLEAN gEnabled;
 extern UINT32 gCalloutId;
 extern HANDLE gRedirectHandle;
 extern volatile LONG gRedirects;
+extern volatile LONG gRedirectAttempts;
+extern volatile LONG gRedirectApplySuccess;
+extern volatile LONG gRedirectApplyFailures;
+extern volatile LONG gLastRedirectApplyStatus;
 
 DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_UNLOAD SvrEvtDriverUnload;

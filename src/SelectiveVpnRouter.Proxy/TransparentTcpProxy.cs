@@ -15,11 +15,24 @@ namespace SelectiveVpnRouter.Proxy;
 public sealed class TransparentTcpProxy : IAsyncDisposable
 {
     private readonly ConcurrentDictionary<string, FlowEvent> _flows = new();
+    private int _acceptedConnections;
+    private int _redirectContextQueries;
+    private int _redirectContextSuccess;
+    private int _redirectContextFailures;
+    private int _lastRedirectContextError;
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _accept;
 
     public int Port { get; private set; }
+    public TransparentProxyDiagnostics Diagnostics => new()
+    {
+        AcceptedConnections = (uint)Volatile.Read(ref _acceptedConnections),
+        RedirectContextQueries = (uint)Volatile.Read(ref _redirectContextQueries),
+        RedirectContextSuccess = (uint)Volatile.Read(ref _redirectContextSuccess),
+        RedirectContextFailures = (uint)Volatile.Read(ref _redirectContextFailures),
+        LastRedirectContextError = Volatile.Read(ref _lastRedirectContextError),
+    };
     public int? VpnInterfaceIndex { get; set; }
     public string? VpnInterfaceName { get; set; }
     public bool BindOutboundToVpn { get; set; } = true;
@@ -80,6 +93,7 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
 
     private async Task HandleAsync(TcpClient incoming, CancellationToken ct)
     {
+        Interlocked.Increment(ref _acceptedConnections);
         using TcpClient client = incoming;
         client.NoDelay = true;
         Socket accepted = client.Client;
@@ -105,15 +119,28 @@ public sealed class TransparentTcpProxy : IAsyncDisposable
         {
             try
             {
+                Interlocked.Increment(ref _redirectContextQueries);
                 records = WfpRedirectSockets.QueryRedirectRecords(accepted);
                 byte[] ctx = WfpRedirectSockets.QueryRedirectContext(accepted);
                 if (WfpRedirectSockets.TryParseContext(ctx, out IPEndPoint parsed))
                 {
+                    Interlocked.Increment(ref _redirectContextSuccess);
                     original = parsed;
                 }
+                else
+                {
+                    Interlocked.Increment(ref _redirectContextFailures);
+                    Volatile.Write(ref _lastRedirectContextError, ctx.Length == 0 ? -1 : -2);
+                }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Interlocked.Increment(ref _redirectContextFailures);
+                Volatile.Write(ref _lastRedirectContextError, ex switch
+                {
+                    SocketException se => se.ErrorCode,
+                    _ => ex.HResult,
+                });
             }
         }
 

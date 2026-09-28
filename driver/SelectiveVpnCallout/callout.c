@@ -1,25 +1,20 @@
 #include "SelectiveVpnCallout.h"
 
-static BOOLEAN SvrProxyProcessAlive(VOID)
+static void SvrApplyModifiedLayerDataTracked(
+    _In_ UINT64 classifyHandle,
+    _In_ FWPS_CONNECT_REQUEST *request,
+    _In_ UINT32 flags,
+    _In_ BOOLEAN countSuccessAsRedirect)
 {
-    PEPROCESS process = NULL;
-    NTSTATUS status;
-    HANDLE pid;
-
-    if (gProxyPid == 0)
+    InterlockedIncrement(&gRedirectAttempts);
+    FwpsApplyModifiedLayerData(classifyHandle, request, flags);
+    /* WDK 10.0.26100: FwpsApplyModifiedLayerData0 returns void (no NTSTATUS). */
+    InterlockedExchange(&gLastRedirectApplyStatus, (LONG)STATUS_SUCCESS);
+    if (countSuccessAsRedirect)
     {
-        return FALSE;
+        InterlockedIncrement(&gRedirectApplySuccess);
+        InterlockedIncrement(&gRedirects);
     }
-
-    pid = (HANDLE)(ULONG_PTR)gProxyPid;
-    status = PsLookupProcessByProcessId(pid, &process);
-    if (!NT_SUCCESS(status) || process == NULL)
-    {
-        return FALSE;
-    }
-
-    ObDereferenceObject(process);
-    return TRUE;
 }
 
 static BOOLEAN SvrAlreadyLoopbackProxy(_In_ const SOCKADDR_IN *remote)
@@ -77,12 +72,6 @@ VOID NTAPI SvrClassifyConnectRedirect(
         return;
     }
 
-    if (!SvrProxyProcessAlive())
-    {
-        SvrFailOpen();
-        return;
-    }
-
     UINT64 classifyHandle = 0;
     NTSTATUS status = FwpsAcquireClassifyHandle((void *)classifyContext, 0, &classifyHandle);
     if (!NT_SUCCESS(status))
@@ -107,7 +96,11 @@ VOID NTAPI SvrClassifyConnectRedirect(
     SOCKADDR_IN *remote = (SOCKADDR_IN *)&request->remoteAddressAndPort;
     if (SvrAlreadyLoopbackProxy(remote))
     {
-        FwpsApplyModifiedLayerData(classifyHandle, request, FWPS_CLASSIFY_FLAG_REAUTHORIZE_IF_MODIFIED_BY_OTHERS);
+        SvrApplyModifiedLayerDataTracked(
+            classifyHandle,
+            request,
+            FWPS_CLASSIFY_FLAG_REAUTHORIZE_IF_MODIFIED_BY_OTHERS,
+            FALSE);
         FwpsReleaseClassifyHandle(classifyHandle);
         classifyOut->actionType = FWP_ACTION_PERMIT;
         return;
@@ -119,7 +112,7 @@ VOID NTAPI SvrClassifyConnectRedirect(
         SVR_POOL_TAG);
     if (ctx == NULL)
     {
-        FwpsApplyModifiedLayerData(classifyHandle, request, 0);
+        SvrApplyModifiedLayerDataTracked(classifyHandle, request, 0, FALSE);
         FwpsReleaseClassifyHandle(classifyHandle);
         classifyOut->actionType = FWP_ACTION_PERMIT;
         return;
@@ -140,10 +133,9 @@ VOID NTAPI SvrClassifyConnectRedirect(
     request->localRedirectContext = ctx;
     request->localRedirectContextSize = sizeof(*ctx);
 
-    FwpsApplyModifiedLayerData(classifyHandle, request, 0);
+    SvrApplyModifiedLayerDataTracked(classifyHandle, request, 0, TRUE);
     FwpsReleaseClassifyHandle(classifyHandle);
 
-    InterlockedIncrement(&gRedirects);
     classifyOut->actionType = FWP_ACTION_PERMIT;
     classifyOut->rights &= ~FWPS_RIGHT_ACTION_WRITE;
 }

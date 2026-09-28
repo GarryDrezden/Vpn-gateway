@@ -28,16 +28,13 @@ dotnet build SelectiveVpnRouter.sln -c Release
 dotnet test SelectiveVpnRouter.sln -c Release
 ```
 
-3. Start the **elevated** service (once per session, or install it):
+3. For normal desktop use, see **[Desktop launch](docs/DESKTOP_LAUNCH.md)** — publish once, install the Windows Service once, then double-click `SelectiveVpnRouter.App.exe`.
 
-```powershell
-# from the Service output directory
-.\SelectiveVpnRouter.Service.exe --console
-```
+   Dev console mode (elevated): `SelectiveVpnRouter.Service.exe --console`
 
-Or: `powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1`
+   Or install service: `powershell -ExecutionPolicy Bypass -File scripts\publish-desktop.ps1` then `scripts\install-service.ps1`
 
-4. Start `SelectiveVpnRouter.App.exe` (does not need to stay elevated).
+4. Start `SelectiveVpnRouter.App.exe` (does not need elevation).
 5. Setup wizard: choose `openvpn.exe`, your `.ovpn`, optionally **Compatibility mode (disable DCO)** if DCO fights another VPN driver.
 6. Connect. The personal tunnel is started with `--route-nopull` so it does **not** replace the system default route.
 7. Add rules:
@@ -64,6 +61,7 @@ If the GUI, service, OpenVPN, or driver policy goes away, Direct internet must k
 
 ## Docs
 
+- [Desktop launch](docs/DESKTOP_LAUNCH.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Network research](docs/NETWORK_ARCHITECTURE_RESEARCH.md)
 - [Manual test plan](docs/MANUAL_TEST_PLAN.md)

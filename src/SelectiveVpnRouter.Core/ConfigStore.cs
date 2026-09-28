@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -45,16 +46,92 @@ public static class ConfigSerializer
 
     public static void Save(string path, AppConfiguration config)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        if (File.Exists(path))
+        string? dir = Path.GetDirectoryName(path);
+        if (string.IsNullOrEmpty(dir))
         {
-            File.Copy(path, AppPaths.ConfigBackupFile, overwrite: true);
+            throw new ArgumentException("Config path must include a directory.", nameof(path));
         }
 
+        Directory.CreateDirectory(dir);
         string json = JsonSerializer.Serialize(config, JsonOptions);
-        string tmp = path + ".tmp";
-        File.WriteAllText(tmp, json);
-        File.Move(tmp, path, overwrite: true);
+        string fileName = Path.GetFileName(path);
+        string tmpPath = Path.Combine(dir, fileName + ".tmp");
+        string backupPath = Path.Combine(dir, Path.GetFileNameWithoutExtension(fileName) + ".bak.json");
+
+        File.WriteAllText(tmpPath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        try
+        {
+            if (File.Exists(path))
+            {
+                ReplaceExistingConfig(tmpPath, path, backupPath);
+            }
+            else
+            {
+                File.Move(tmpPath, path);
+            }
+        }
+        finally
+        {
+            DeleteIfExists(tmpPath);
+        }
+    }
+
+    private static void ReplaceExistingConfig(string tmpPath, string destPath, string backupPath)
+    {
+        try
+        {
+            NormalizeAttributes(backupPath);
+            NormalizeAttributes(destPath);
+            File.Replace(tmpPath, destPath, backupPath, ignoreMetadataErrors: true);
+        }
+        catch (Exception ex) when (IsRecoverableReplaceFailure(ex))
+        {
+            File.Move(tmpPath, destPath, overwrite: true);
+            TryRefreshBackup(destPath, backupPath);
+        }
+    }
+
+    private static void TryRefreshBackup(string sourcePath, string backupPath)
+    {
+        try
+        {
+            NormalizeAttributes(backupPath);
+            File.Copy(sourcePath, backupPath, overwrite: true);
+        }
+        catch (Exception)
+        {
+            // Backup is best-effort and must not block the primary config save.
+        }
+    }
+
+    private static bool IsRecoverableReplaceFailure(Exception ex) =>
+        ex is IOException or UnauthorizedAccessException;
+
+    private static void NormalizeAttributes(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        File.SetAttributes(path, FileAttributes.Normal);
+    }
+
+    private static void DeleteIfExists(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            NormalizeAttributes(path);
+            File.Delete(path);
+        }
+        catch (Exception)
+        {
+        }
     }
 
     public static CrashState LoadCrashState(string path)

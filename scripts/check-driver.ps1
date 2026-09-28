@@ -63,13 +63,66 @@ if ($svc) {
     Observe "WARNING" "service" "not installed"
 }
 
-$deviceOk = $false
+if (-not ("SvrDeviceCheck" -as [type])) {
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class SvrDeviceCheck
+{
+    private const uint GENERIC_READ = 0x80000000;
+    private const uint GENERIC_WRITE = 0x40000000;
+    private const uint FILE_SHARE_READ = 0x00000001;
+    private const uint FILE_SHARE_WRITE = 0x00000002;
+    private const uint OPEN_EXISTING = 3;
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern SafeFileHandle CreateFileW(
+        string lpFileName,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        IntPtr lpSecurityAttributes,
+        uint dwCreationDisposition,
+        uint dwFlagsAndAttributes,
+        IntPtr hTemplateFile);
+
+    public static bool TryOpenDevice(string path, out int lastError)
+    {
+        lastError = 0;
+        using (SafeFileHandle handle = CreateFileW(
+            path,
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            IntPtr.Zero,
+            OPEN_EXISTING,
+            0,
+            IntPtr.Zero))
+        {
+            if (handle.IsInvalid)
+            {
+                lastError = Marshal.GetLastWin32Error();
+                return false;
+            }
+            return true;
+        }
+    }
+}
+"@
+}
+
 try {
-    $fs = [IO.File]::Open("\\.\SelectiveVpnCallout", [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite)
-    $fs.Close()
-    $deviceOk = $true
-} catch { }
-Observe $(if ($deviceOk) { "PASS" } else { "FAIL" }) "device" $(if ($deviceOk) { "\\.\SelectiveVpnCallout opened" } else { "device not openable (driver not loaded or ACL)" })
+    $win32Error = 0
+    $opened = [SvrDeviceCheck]::TryOpenDevice("\\.\SelectiveVpnCallout", [ref]$win32Error)
+    if ($opened) {
+        Observe "PASS" "device" "\\.\SelectiveVpnCallout opened"
+    } else {
+        $win32Msg = (New-Object System.ComponentModel.Win32Exception($win32Error)).Message
+        Observe "FAIL" "device" "CreateFileW failed: Win32 $win32Error - $win32Msg"
+    }
+} catch {
+    Observe "FAIL" "device" "CreateFileW helper error: $($_.Exception.GetType().Name): $($_.Exception.Message)"
+}
 
 Write-Host ""
 Write-Host "This checker never enables TESTSIGNING, never disables Secure Boot/HVCI/BitLocker."
