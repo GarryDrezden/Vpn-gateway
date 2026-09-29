@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -18,23 +19,27 @@ public sealed class ServiceClient
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(operationMs);
 
+        NamedPipeClientStream? pipe = null;
         try
         {
-            using var pipe = new NamedPipeClientStream(".", AppPaths.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            pipe = new NamedPipeClientStream(".", AppPaths.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             await pipe.ConnectAsync(IpcTimeouts.PipeConnectMs, timeoutCts.Token).ConfigureAwait(false);
-            using var writer = new BinaryWriter(pipe, Encoding.UTF8, leaveOpen: true);
-            using var reader = new BinaryReader(pipe, Encoding.UTF8, leaveOpen: true);
-            writer.Write(body.Length);
-            writer.Write(body);
-            writer.Flush();
-            int len = reader.ReadInt32();
-            byte[] respBody = reader.ReadBytes(len);
+            await WriteFrameAsync(pipe, body, timeoutCts.Token).ConfigureAwait(false);
+            byte[] respBody = await ReadFrameAsync(pipe, timeoutCts.Token).ConfigureAwait(false);
             return JsonSerializer.Deserialize<IpcResponse>(respBody, ConfigSerializer.JsonOptions)
                 ?? new IpcResponse { Id = req.Id, Ok = false, Error = "Empty IPC response." };
+        }
+        catch (TimeoutException) when (pipe is null || !pipe.IsConnected)
+        {
+            throw new IpcTimeoutException(method, IpcTimeouts.PipeConnectMs);
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
         {
             throw new IpcTimeoutException(method, operationMs);
+        }
+        finally
+        {
+            pipe?.Dispose();
         }
     }
 
@@ -64,6 +69,45 @@ public sealed class ServiceClient
         catch (Exception)
         {
             return false;
+        }
+    }
+
+    private static async Task WriteFrameAsync(Stream pipe, byte[] body, CancellationToken ct)
+    {
+        byte[] header = new byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(header, body.Length);
+        await pipe.WriteAsync(header, ct).ConfigureAwait(false);
+        await pipe.WriteAsync(body, ct).ConfigureAwait(false);
+        await pipe.FlushAsync(ct).ConfigureAwait(false);
+    }
+
+    private static async Task<byte[]> ReadFrameAsync(Stream pipe, CancellationToken ct)
+    {
+        byte[] header = new byte[4];
+        await ReadExactlyAsync(pipe, header, ct).ConfigureAwait(false);
+        int len = BinaryPrimitives.ReadInt32LittleEndian(header);
+        if (len <= 0 || len > 4_000_000)
+        {
+            throw new InvalidOperationException("Invalid IPC response length.");
+        }
+
+        byte[] body = new byte[len];
+        await ReadExactlyAsync(pipe, body, ct).ConfigureAwait(false);
+        return body;
+    }
+
+    private static async Task ReadExactlyAsync(Stream stream, byte[] buffer, CancellationToken ct)
+    {
+        int offset = 0;
+        while (offset < buffer.Length)
+        {
+            int read = await stream.ReadAsync(buffer.AsMemory(offset), ct).ConfigureAwait(false);
+            if (read == 0)
+            {
+                throw new EndOfStreamException("IPC stream ended before frame completed.");
+            }
+
+            offset += read;
         }
     }
 }

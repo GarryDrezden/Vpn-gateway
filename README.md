@@ -23,18 +23,31 @@ Real external application verified: `C:\Windows\System32\curl.exe` with temporar
 
 Full chain: curl.exe → WFP filter → callout → transparent proxy → VPN-bound outbound → TLS/HTTP → VPN egress.
 
+### Milestone 3 — `browser-vpn-egress-pass-v1`
+
+Real browser verified: `C:\Program Files (x86)\Google\Chrome\Application\chrome.exe` with temporary APP_ID rule.
+
+- Chrome opened `https://api.ipify.org` and showed VPN public IP (`91.184.250.53`)
+- Direct traffic without rule stays Direct (`curl.exe -4 https://api.ipify.org` → `83.143.157.1`)
+- Test Center target `api.ipify.org:443` → **TARGET CLOSED / PASS** (`WFP=True`, `Proxy=True`, `Context=True`, `Bound=True`, `Connected=True`, `Route=Vpn`)
+- Target flow matching isolates resolved target IPs; background Chrome flows (Google/CDN) do not overwrite target PASS
+- VPN adapter readiness: APIPA/Tentative rejected; managed DAD discovery; safe ConnectVpn IPC timeout + rollback
+
+Full chain: chrome.exe → ALE APP_ID / WFP → callout → transparent proxy → VPN-bound outbound → HTTPS → VPN egress.
+
 ### Verified now (TCP IPv4)
 
 - Per-process connect-redirect for selected `.exe` processes
-- Probe isolation + real-app curl egress
+- Probe isolation + real-app curl egress + real Chrome browser egress
 - WFP ALE APP_ID, callout redirect, proxy, redirect context, VPN-bound outbound
+- Real-app flow history with target matching (background flows do not false-pass target)
 
 ### Not verified yet (do not assume support)
 
-- UDP / QUIC per-process routing
-- IPv6 egress end-to-end
-- Arbitrary DNS behaviour for all apps (use `--resolve` or manual verification)
-- Full GUI browser acceptance without controlled HTTP client
+- Full UDP / QUIC per-process routing
+- IPv6 VPN egress end-to-end
+- Arbitrary DNS routing for all apps
+- Production installer / consumer packaging
 
 ## What this is
 

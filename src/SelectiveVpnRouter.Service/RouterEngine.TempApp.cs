@@ -25,6 +25,11 @@ public sealed partial class RouterEngine
                 .ThenByDescending(f => f.SequenceId)
                 .ToArray();
 
+        IReadOnlyList<TempAppVpnFlowDto> recentDtos = matching
+            .Take(10)
+            .Select(TempAppVpnFlowMapper.FromFlow)
+            .ToArray();
+
         RealAppFlowObservation? selected = matching.FirstOrDefault() is FlowEvent latest
             ? RealAppRoutingObservation.FromFlow(latest)
             : null;
@@ -50,7 +55,7 @@ public sealed partial class RouterEngine
             Error = filter?.Error,
             QueriedAt = DateTimeOffset.UtcNow,
             SelectedFlow = selected,
-            RecentFlows = matching.Take(10).Select(RealAppRoutingObservation.FromFlow).ToArray(),
+            RecentFlows = recentDtos.Select(TempAppVpnFlowDtoToObservation).ToArray(),
             ObservationState = RealAppRoutingObservation.ComputeState(selected),
             WfpLayerAudit = WfpPolicyLayerAudit.Summary(_driver?.IsLoaded == true, ipv6Block),
             RouteDiagnostic = routeDiagnostic,
@@ -79,6 +84,52 @@ public sealed partial class RouterEngine
         Log("temp-app-vpn-removed");
         return GetTempAppVpnStatus();
     }
+
+    public TempAppVpnFlowsResponse GetTempAppVpnFlows(string exePath, int maxCount = TempAppVpnFlowQuery.DefaultMaxCount)
+    {
+        string? path = string.IsNullOrWhiteSpace(exePath) ? _tempRealAppExePath : exePath;
+        IReadOnlyList<FlowEvent> flows = Proxy?.Flows ?? [];
+        return new TempAppVpnFlowsResponse
+        {
+            QueriedAt = DateTimeOffset.UtcNow,
+            Flows = path is null ? [] : TempAppVpnFlowQuery.Query(flows, path, maxCount),
+        };
+    }
+
+    private static RealAppFlowObservation TempAppVpnFlowDtoToObservation(TempAppVpnFlowDto dto) =>
+        new()
+        {
+            FlowId = dto.FlowId,
+            SequenceId = dto.SequenceId,
+            CreatedAt = dto.CreatedAt,
+            UpdatedAt = dto.UpdatedAt,
+            Pid = dto.ProcessId,
+            Destination = dto.Destination,
+            Port = dto.Port,
+            WfpRedirect = dto.WfpRedirect,
+            ProxyAccepted = dto.ProxyAccepted,
+            RedirectRecordsApplied = dto.RedirectContextRecovered,
+            VpnOutboundCreated = dto.VpnOutboundCreated,
+            VpnOutboundBound = dto.VpnOutboundBound,
+            VpnOutboundConnected = dto.VpnOutboundConnected,
+            Route = dto.Route,
+            Status = dto.Status,
+            HasFlowError = FlowStatusHelper.IsError(dto.Status) || FlowStatusHelper.IsCancelled(dto.Status),
+            RoutingObserved = TargetFlowAcceptance.HasRoutingObserved(dto),
+            TcpConnectSuccess = dto.TcpConnectSuccess,
+            EgressVerified = dto.TcpConnectSuccess && FlowStatusHelper.IsSuccessTerminal(dto.Status),
+            ErrorDetails = dto.ErrorPhase is null && dto.ErrorMessage is null
+                ? null
+                : new FlowErrorDetails
+                {
+                    Phase = dto.ErrorPhase ?? "",
+                    ExceptionType = dto.ErrorReason ?? "",
+                    CancellationReason = dto.ErrorReason,
+                    SocketErrorCode = dto.SocketError,
+                    NativeErrorCode = dto.NativeError,
+                    Message = dto.ErrorMessage ?? "",
+                },
+        };
 
     private void ClearTempRealAppRoute()
     {

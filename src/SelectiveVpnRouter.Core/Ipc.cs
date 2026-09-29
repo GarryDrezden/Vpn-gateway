@@ -32,6 +32,7 @@ public sealed record ServiceSnapshot
     public bool TransparentRedirectActive { get; init; }
     public OpenVpnLiveStatus Vpn { get; init; } = new();
     public AdapterLiveStatus? VpnAdapter { get; init; }
+    public VpnAdapterSelectionDiagnostics? VpnAdapterSelection { get; init; }
     public AdapterLiveStatus? DirectAdapter { get; init; }
     public IReadOnlyList<FlowEvent> Flows { get; init; } = [];
     public IReadOnlyList<DiagnosticResult> LastDiagnostics { get; init; } = [];
@@ -62,6 +63,16 @@ public sealed record AdapterLiveStatus
     public int? Ipv4Index { get; init; }
     public IReadOnlyList<string> Ipv4 { get; init; } = [];
     public IReadOnlyList<string> Ipv6 { get; init; } = [];
+}
+
+public sealed record VpnAdapterSelectionDiagnostics
+{
+    public int IfIndex { get; init; }
+    public string Name { get; init; } = "";
+    public string Ipv4 { get; init; } = "";
+    public string Ipv4State { get; init; } = "";
+    public string Gateway { get; init; } = "";
+    public string SelectionReason { get; init; } = "";
 }
 
 public sealed record DiagnosticResult
@@ -141,13 +152,25 @@ public static class IpcMethods
     public const string ApplyTempAppVpnRoute = "ApplyTempAppVpnRoute";
     public const string RemoveTempAppVpnRoute = "RemoveTempAppVpnRoute";
     public const string GetTempAppVpnStatus = "GetTempAppVpnStatus";
+    public const string GetTempAppVpnFlows = "GetTempAppVpnFlows";
+}
+
+public static class VpnConnectBudget
+{
+    public const int OpenVpnStartupMs = 45_000;
+    public const int VpnAdapterReadinessMs = 15_000;
+    public const int ConnectVpnSetupMs = 10_000;
+
+    public const int TotalOperationMs =
+        OpenVpnStartupMs + VpnAdapterReadinessMs + ConnectVpnSetupMs;
 }
 
 public static class IpcTimeouts
 {
     public const int PipeConnectMs = 5_000;
     public const int ShortOperationMs = 15_000;
-    public const int ConnectVpnMs = 90_000;
+    public const int ConnectVpnIpcMarginMs = 15_000;
+    public const int ConnectVpnMs = VpnConnectBudget.TotalOperationMs + ConnectVpnIpcMarginMs;
     public const int LongOperationMs = 60_000;
 
     public static int OperationTimeoutMs(string method) =>
@@ -160,6 +183,21 @@ public static class IpcTimeouts
             IpcMethods.ExportDiagnostics => LongOperationMs,
             _ => ShortOperationMs,
         };
+}
+
+public sealed class VpnTunnelNotReadyException : InvalidOperationException
+{
+    public int ReadinessTimeoutMs { get; }
+
+    public VpnTunnelNotReadyException(string diagnostics, int readinessTimeoutMs)
+        : base(diagnostics)
+    {
+        ReadinessTimeoutMs = readinessTimeoutMs;
+    }
+
+    public static bool IsReadinessFailureMessage(string? message) =>
+        !string.IsNullOrWhiteSpace(message)
+        && message.StartsWith("VPN tunnel adapter is not ready after ", StringComparison.Ordinal);
 }
 
 public sealed class IpcTimeoutException : TimeoutException

@@ -8,7 +8,7 @@ $out = Join-Path $root "artifacts\publish\SelectiveVpnRouter"
 $ico = Join-Path $root "src\SelectiveVpnRouter.App\SelectiveVpnRouter.ico"
 $embed = Join-Path $PSScriptRoot "embed-app-icon.ps1"
 
-if (Test-Path $out) { Remove-Item -Recurse -Force $out }
+Remove-DirectoryWithRetry -Path $out -PublishDir $out
 New-Item -ItemType Directory -Path $out -Force | Out-Null
 
 $publishArgs = @("publish", "-c", "Release", "-r", "win-x64", "--self-contained", "false", "-o", $out, "/p:PublishSingleFile=false")

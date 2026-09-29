@@ -1,26 +1,12 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Text;
+using SelectiveVpnRouter.Core;
 
 namespace SelectiveVpnRouter.Network;
 
 public static class ProcessOutputEncoding
 {
-    public static Encoding ConsoleOem
-    {
-        get
-        {
-            try
-            {
-                int codePage = CultureInfo.CurrentCulture.TextInfo.OEMCodePage;
-                return codePage > 0 ? Encoding.GetEncoding(codePage) : Encoding.UTF8;
-            }
-            catch (ArgumentException)
-            {
-                return Encoding.UTF8;
-            }
-        }
-    }
+    public static Encoding ConsoleOem => TextEncodingBootstrap.GetConsoleOemEncoding();
 
     public static void UseConsoleEncoding(ProcessStartInfo psi)
     {

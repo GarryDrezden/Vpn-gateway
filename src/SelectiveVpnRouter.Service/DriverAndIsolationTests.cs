@@ -578,21 +578,13 @@ internal static class DriverAndIsolationTests
             return Warn(name, "Refused without explicit confirmation. This does not change TESTSIGNING/Secure Boot/HVCI.");
         }
 
-        string script = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "scripts", file);
-        script = Path.GetFullPath(script);
-        if (!File.Exists(script))
+        ScriptLookupResult lookup = RepoPathResolver.ResolveScript(file);
+        if (!lookup.Found || lookup.ScriptPath is null)
         {
-            string alt = Path.Combine(AppContext.BaseDirectory, "scripts", file);
-            if (File.Exists(alt))
-            {
-                script = alt;
-            }
+            return Fail(name, lookup.FormatFailureMessage());
         }
 
-        if (!File.Exists(script))
-        {
-            return Fail(name, "Script not found: " + file + ". Run from repo scripts\\ folder.");
-        }
+        string script = lookup.ScriptPath;
 
         var psi = new ProcessStartInfo
         {

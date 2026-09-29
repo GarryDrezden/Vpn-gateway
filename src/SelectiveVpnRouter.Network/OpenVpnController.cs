@@ -122,7 +122,7 @@ public sealed class OpenVpnController : IAsyncDisposable
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();
 
-        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(45);
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(VpnConnectBudget.OpenVpnStartupMs);
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();

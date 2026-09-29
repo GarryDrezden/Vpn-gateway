@@ -118,6 +118,7 @@ public sealed class PipeIpcHost : BackgroundService
                 IpcMethods.ExportDiagnostics => JsonSerializer.Serialize(new { path = _engine.ExportDiagnosticsZip() }, ConfigSerializer.JsonOptions),
                 IpcMethods.GetFlows => JsonSerializer.Serialize(_engine.Snapshot().Flows, ConfigSerializer.JsonOptions),
                 IpcMethods.GetTempAppVpnStatus => JsonSerializer.Serialize(_engine.GetTempAppVpnStatus(), ConfigSerializer.JsonOptions),
+                IpcMethods.GetTempAppVpnFlows => GetTempAppFlows(req.PayloadJson),
                 IpcMethods.ApplyTempAppVpnRoute => await ApplyTempAppRoute(req.PayloadJson).ConfigureAwait(false),
                 IpcMethods.RemoveTempAppVpnRoute => await RemoveTempAppRoute().ConfigureAwait(false),
                 _ => throw new InvalidOperationException("Unknown method " + req.Method),
@@ -154,7 +155,7 @@ public sealed class PipeIpcHost : BackgroundService
             string profile = req?.ProfilePath ?? _engine.Config.Vpn.ProfilePath;
             _engine.Log("connect-request-received exe=" + exe + " profile=" + profile
                 + " disableDco=" + (req?.DisableDco ?? _engine.Config.Vpn.CompatibilityDisableDco));
-            await _engine.ConnectAsync(req, ct).ConfigureAwait(false);
+            await _engine.ConnectAsync(req, _engine.ServiceCancellationToken).ConfigureAwait(false);
             return JsonSerializer.Serialize(_engine.Snapshot(), ConfigSerializer.JsonOptions);
         }
         finally
@@ -200,6 +201,14 @@ public sealed class PipeIpcHost : BackgroundService
 
         DiagnosticResult r = await _engine.RunDiagnosticAsync(name, ct, confirm).ConfigureAwait(false);
         return JsonSerializer.Serialize(r, ConfigSerializer.JsonOptions);
+    }
+
+    private string GetTempAppFlows(string? json)
+    {
+        TempAppVpnFlowsRequest req = JsonSerializer.Deserialize<TempAppVpnFlowsRequest>(json ?? "{}", ConfigSerializer.JsonOptions)
+            ?? throw new InvalidOperationException("Invalid temp app flows request.");
+        TempAppVpnFlowsResponse response = _engine.GetTempAppVpnFlows(req.ExePath, req.MaxCount);
+        return JsonSerializer.Serialize(response, ConfigSerializer.JsonOptions);
     }
 
     private async Task<string> ApplyTempAppRoute(string? json)

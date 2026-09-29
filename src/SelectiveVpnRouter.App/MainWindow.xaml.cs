@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
@@ -20,6 +22,10 @@ public partial class MainWindow : Window
 {
     private readonly ServiceClient _client = new();
     private readonly ObservableCollection<RuleRow> _rules = [];
+    private readonly ObservableCollection<RealAppFlowHistoryRow> _realAppFlows = [];
+    private readonly List<string> _resolvedTargetAddresses = [];
+    private int _targetPort = 443;
+    private IReadOnlyList<TempAppVpnFlowDto> _lastRealAppFlowDtos = [];
     private readonly Forms.NotifyIcon _tray = new();
     private readonly PeriodicTimer _timer = new(TimeSpan.FromSeconds(2));
     private CancellationTokenSource _cts = new();
@@ -36,6 +42,7 @@ public partial class MainWindow : Window
         }
 
         RulesGrid.ItemsSource = _rules;
+        RealAppFlowGrid.ItemsSource = _realAppFlows;
         _tray.Text = "Selective VPN Router";
         _tray.Visible = true;
         Icon = AppIconHelper.WpfIcon;
@@ -354,6 +361,41 @@ public partial class MainWindow : Window
 
     private async void OnRefreshTempRealApp(object sender, RoutedEventArgs e) => await RefreshTempRealAppStatusAsync(force: true);
 
+    private void OnResolveRealAppTarget(object sender, RoutedEventArgs e) => ResolveRealAppTargetAddresses();
+
+    private void OnRealAppTargetFilterChanged(object sender, RoutedEventArgs e) => ApplyRealAppFlowHistoryDisplay();
+
+    private void ResolveRealAppTargetAddresses()
+    {
+        _resolvedTargetAddresses.Clear();
+        if (!TargetEndpointParser.TryParse(RealAppTargetBox.Text.Trim(), out string host, out int port))
+        {
+            RealAppResolvedTargetsLine.Text = "Resolved: invalid target (use host:port)";
+            return;
+        }
+
+        _targetPort = port;
+        try
+        {
+            IPAddress[] addresses = Dns.GetHostAddresses(host);
+            foreach (IPAddress address in addresses.Where(a => a.AddressFamily == AddressFamily.InterNetwork))
+            {
+                _resolvedTargetAddresses.Add(address.ToString());
+            }
+
+            RealAppResolvedTargetsLine.Text = _resolvedTargetAddresses.Count == 0
+                ? $"Resolved: no IPv4 A-records for {host}"
+                : "Resolved: " + string.Join(", ", _resolvedTargetAddresses);
+        }
+        catch (Exception ex)
+        {
+            RealAppResolvedTargetsLine.Text = "Resolved: DNS failed — " + ex.Message;
+        }
+
+        ApplyRealAppFlowHistoryDisplay();
+        ApplyRealAppTargetStatus(_lastRealAppFlowDtos, DateTimeOffset.UtcNow);
+    }
+
     private async Task RefreshTempRealAppStatusAsync(bool force = false)
     {
         if (_connectUiActive && !force)
@@ -363,13 +405,32 @@ public partial class MainWindow : Window
 
         try
         {
-            TempAppVpnStatus? status = await _client.SendOkAsync<TempAppVpnStatus>(
+            string exe = RealAppExeBox.Text.Trim();
+            Task<TempAppVpnStatus?> statusTask = _client.SendOkAsync<TempAppVpnStatus>(
                 IpcMethods.GetTempAppVpnStatus,
                 null,
                 _cts.Token);
+            Task<TempAppVpnFlowsResponse?> flowsTask = string.IsNullOrWhiteSpace(exe)
+                ? Task.FromResult<TempAppVpnFlowsResponse?>(null)
+                : _client.SendOkAsync<TempAppVpnFlowsResponse>(
+                    IpcMethods.GetTempAppVpnFlows,
+                    new TempAppVpnFlowsRequest { ExePath = exe, MaxCount = TempAppVpnFlowQuery.DefaultMaxCount },
+                    _cts.Token);
+
+            await Task.WhenAll(statusTask, flowsTask);
+            TempAppVpnStatus? status = await statusTask;
+            TempAppVpnFlowsResponse? flows = await flowsTask;
             if (status is not null)
             {
-                ApplyTempRealAppStatus(status);
+                if (string.IsNullOrWhiteSpace(exe) && !string.IsNullOrWhiteSpace(status.ExePath))
+                {
+                    flows = await _client.SendOkAsync<TempAppVpnFlowsResponse>(
+                        IpcMethods.GetTempAppVpnFlows,
+                        new TempAppVpnFlowsRequest { ExePath = status.ExePath, MaxCount = TempAppVpnFlowQuery.DefaultMaxCount },
+                        _cts.Token);
+                }
+
+                ApplyTempRealAppStatus(status, flows);
             }
         }
         catch (Exception)
@@ -378,10 +439,13 @@ public partial class MainWindow : Window
             RealAppStatusLine.Foreground = System.Windows.Media.Brushes.Gray;
             RealAppDetailLine.Text = string.Empty;
             RealAppAdvancedLine.Text = string.Empty;
+            RealAppTargetStatusLine.Text = "Цель: —";
+            RealAppQueriedAtLine.Text = string.Empty;
+            _realAppFlows.Clear();
         }
     }
 
-    private void ApplyTempRealAppStatus(TempAppVpnStatus status)
+    private void ApplyTempRealAppStatus(TempAppVpnStatus status, TempAppVpnFlowsResponse? flows = null)
     {
         if (!string.IsNullOrWhiteSpace(status.ExePath))
         {
@@ -394,6 +458,10 @@ public partial class MainWindow : Window
             RealAppStatusLine.Foreground = System.Windows.Media.Brushes.Gray;
             RealAppDetailLine.Text = "Выберите EXE и включите временный VPN-маршрут.";
             RealAppAdvancedLine.Text = string.Empty;
+            RealAppTargetStatusLine.Text = "Цель: —";
+            RealAppQueriedAtLine.Text = string.Empty;
+            _lastRealAppFlowDtos = [];
+            _realAppFlows.Clear();
             return;
         }
 
@@ -406,7 +474,7 @@ public partial class MainWindow : Window
         switch (status.ObservationState)
         {
             case RealAppRoutingObservation.EgressVerified:
-                RealAppStatusLine.Text = "PASS — VPN egress подтверждён (flow завершился успешно)";
+                RealAppStatusLine.Text = "Latest flow — TCP closed successfully (см. целевой статус ниже)";
                 RealAppStatusLine.Foreground = new System.Windows.Media.SolidColorBrush(
                     System.Windows.Media.Color.FromRgb(0x15, 0x80, 0x3D));
                 break;
@@ -472,6 +540,69 @@ public partial class MainWindow : Window
                 errorLine +
                 (string.IsNullOrWhiteSpace(status.RouteDiagnostic) ? "" : Environment.NewLine + status.RouteDiagnostic);
         }
+
+        DateTimeOffset queriedAt = flows?.QueriedAt ?? status.QueriedAt;
+        _lastRealAppFlowDtos = flows?.Flows ?? [];
+        if (_resolvedTargetAddresses.Count == 0)
+        {
+            ResolveRealAppTargetAddresses();
+        }
+        else
+        {
+            ApplyRealAppFlowHistoryDisplay();
+            ApplyRealAppTargetStatus(_lastRealAppFlowDtos, queriedAt);
+        }
+    }
+
+    private void ApplyRealAppFlowHistoryDisplay()
+    {
+        _realAppFlows.Clear();
+        IEnumerable<TempAppVpnFlowDto> source = _lastRealAppFlowDtos;
+        if (RealAppTargetFilterOnly.IsChecked == true && _resolvedTargetAddresses.Count > 0)
+        {
+            source = source.Where(f => TargetFlowMatcher.MatchesTarget(f, _resolvedTargetAddresses, _targetPort));
+        }
+
+        IEnumerable<TempAppVpnFlowDto> ordered = source
+            .OrderByDescending(f => _resolvedTargetAddresses.Count > 0
+                && TargetFlowMatcher.MatchesTarget(f, _resolvedTargetAddresses, _targetPort))
+            .ThenByDescending(f => f.UpdatedAt)
+            .ThenByDescending(f => f.SequenceId);
+
+        foreach (TempAppVpnFlowDto dto in ordered)
+        {
+            _realAppFlows.Add(RealAppFlowHistoryRow.FromDto(dto, _resolvedTargetAddresses, _targetPort));
+        }
+    }
+
+    private void ApplyRealAppTargetStatus(IReadOnlyList<TempAppVpnFlowDto> flows, DateTimeOffset queriedAt)
+    {
+        RealAppQueriedAtLine.Text = $"QueriedAt: {queriedAt.ToLocalTime():HH:mm:ss.fff}";
+        if (_resolvedTargetAddresses.Count == 0)
+        {
+            RealAppTargetStatusLine.Text = "Цель: resolve target addresses first";
+            RealAppTargetStatusLine.Foreground = System.Windows.Media.Brushes.Gray;
+            return;
+        }
+
+        TempAppVpnFlowDto? targetFlow = TargetFlowMatcher.SelectLatestTargetFlow(
+            flows,
+            _resolvedTargetAddresses,
+            _targetPort);
+        string state = TargetFlowAcceptance.ComputeState(targetFlow);
+        RealAppTargetStatusLine.Text = TargetFlowAcceptance.FormatTargetStatusLine(state, targetFlow);
+        RealAppTargetStatusLine.Foreground = state switch
+        {
+            TargetAcceptanceState.ClosedPass => new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0x15, 0x80, 0x3D)),
+            TargetAcceptanceState.Connected or TargetAcceptanceState.RoutingObserved => new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0x1D, 0x4E, 0xD8)),
+            TargetAcceptanceState.Error => new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xB9, 0x1C, 0x1C)),
+            TargetAcceptanceState.Connecting => new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xB4, 0x53, 0x09)),
+            _ => System.Windows.Media.Brushes.Gray,
+        };
     }
 
     private void OnClearDiagLog(object sender, RoutedEventArgs e) => DiagResults.Items.Clear();
@@ -567,6 +698,11 @@ public partial class MainWindow : Window
 
     private async Task ConnectVpnAsync()
     {
+        if (_connectUiActive)
+        {
+            return;
+        }
+
         SetConnectUiBusy(true);
         LogConnectStage("connect-click");
         ConnectVpnRequest request = BuildConnectVpnRequestFromUi();
@@ -588,6 +724,12 @@ public partial class MainWindow : Window
             }
 
             MessageBox.Show(IpcTimeoutException.ConnectVpnUserMessage, "Selective VPN Router");
+        }
+        catch (InvalidOperationException ex) when (VpnTunnelNotReadyException.IsReadinessFailureMessage(ex.Message))
+        {
+            LogConnectStage("connect-response readiness-timeout");
+            await RefreshAsync(force: true);
+            MessageBox.Show(ex.Message, "VPN adapter not ready");
         }
         catch (Exception ex)
         {

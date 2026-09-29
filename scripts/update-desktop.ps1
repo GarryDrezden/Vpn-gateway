@@ -3,18 +3,10 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_common.ps1")
 
 $root = Get-SvrRepoRoot
-$publishDir = Join-Path $root "artifacts\publish\SelectiveVpnRouter"
+$publishDir = Get-SvrPublishDirectory -Root $root
 $appExe = Join-Path $publishDir "SelectiveVpnRouter.App.exe"
 $serviceName = "SelectiveVpnRouter"
 $serviceTimeout = New-TimeSpan -Seconds 30
-
-function Stop-AppIfRunning {
-    $proc = Get-Process -Name "SelectiveVpnRouter.App" -ErrorAction SilentlyContinue
-    if (-not $proc) { return }
-    Write-SvrResult -Outcome INFO -Name "update-desktop" -Message "Stopping SelectiveVpnRouter.App (PID $($proc.Id))."
-    $proc | Stop-Process -Force
-    $proc.WaitForExit(5000)
-}
 
 function Wait-ServiceStatus {
     param(
@@ -25,17 +17,20 @@ function Wait-ServiceStatus {
     $svc.WaitForStatus($Status, $serviceTimeout)
 }
 
-Stop-AppIfRunning
+# 1. Stop all GUI instances before touching publish directory.
+Stop-AllSvrGuiProcesses -TimeoutSeconds 10
 
-$service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-$serviceExisted = [bool]$service
-if ($serviceExisted) {
-    if ($service.Status -ne "Stopped") {
-        Stop-Service -Name $serviceName -Force -ErrorAction Stop
-        Wait-ServiceStatus -Name $serviceName -Status Stopped
-    }
-}
+# 2. Stop Windows Service and wait until Stopped (force service process if needed).
+$serviceExisted = Stop-SvrServiceForPublish -ServiceName $serviceName -TimeoutSeconds 15
 
+# 3. Ensure no executable from publish directory is still running.
+Ensure-SvrPublishDirectoryUnlocked -PublishDir $publishDir -ProcessExitTimeoutSeconds 10
+Write-SvrResult -Outcome INFO -Name "publish-lock-check" -Message "no processes using publish directory"
+
+# 4. Remove old publish folder with retry (handles lingering DLL handles).
+Remove-DirectoryWithRetry -Path $publishDir -PublishDir $publishDir
+
+# 5. Publish managed binaries.
 & (Join-Path $PSScriptRoot "publish-desktop.ps1")
 if ($LASTEXITCODE -ne 0) {
     Write-SvrResult -Outcome FAIL -Name "update-desktop" -Message "publish-desktop.ps1 failed with exit code $LASTEXITCODE"
@@ -44,6 +39,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-SvrResult -Outcome PASS -Name "publish" -Message $publishDir
 
+# 6. Install or reconfigure service, then start.
 if (-not $serviceExisted) {
     & (Join-Path $PSScriptRoot "install-service.ps1") -BinPath (Join-Path $publishDir "SelectiveVpnRouter.Service.exe")
     if ($LASTEXITCODE -ne 0) {

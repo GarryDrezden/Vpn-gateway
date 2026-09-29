@@ -28,6 +28,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
     private readonly CancellationTokenSource _serviceCts = new();
     private bool _paused;
     private AdapterView? _vpnAdapter;
+    private VpnAdapterSelection? _vpnAdapterSelection;
     private AdapterView? _directAdapter;
     private IReadOnlyList<AdapterView> _beforeConnect = [];
 
@@ -36,6 +37,8 @@ public sealed partial class RouterEngine : IAsyncDisposable
         get { lock (_gate) return _config; }
         private set { lock (_gate) _config = value; }
     }
+
+    public CancellationToken ServiceCancellationToken => _serviceCts.Token;
 
     public void Load()
     {
@@ -64,6 +67,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
                 && _driver.TryGetStatus(out CalloutArmStatus arm, out _) && arm.Enabled,
             Vpn = vpn?.Live() ?? new OpenVpnLiveStatus(),
             VpnAdapter = ToLive(_vpnAdapter),
+            VpnAdapterSelection = ToSelectionDiagnostics(_vpnAdapterSelection),
             DirectAdapter = ToLive(_directAdapter),
             Flows = proxy?.Flows ?? [],
             LastDiagnostics = _diagnostics.TakeLast(40).ToArray(),
@@ -107,81 +111,83 @@ public sealed partial class RouterEngine : IAsyncDisposable
         _beforeConnect = AdapterCatalog.All();
         _directAdapter = PickDirect(_beforeConnect);
         _vpn = new OpenVpnController();
-        Log("openvpn-start exe=" + exe);
         try
         {
+            Log("openvpn-start exe=" + exe);
             await _vpn.StartAsync(exe, profile, dco, ct).ConfigureAwait(false);
+            Log("openvpn-started pid=" + (_vpn.Pid?.ToString() ?? "?"));
+
+            VpnAdapterSelection? selection = await VpnAdapterSelector.WaitForReadyAsync(
+                _beforeConnect,
+                _vpn,
+                TimeSpan.FromMilliseconds(VpnConnectBudget.VpnAdapterReadinessMs),
+                ct).ConfigureAwait(false);
+            if (selection is null)
+            {
+                IReadOnlyList<VpnAdapterReadinessCandidate> readinessCandidates =
+                    VpnAdapterSelector.BuildCandidates(_beforeConnect, AdapterCatalog.All());
+                string diagnostics = VpnAdapterSelector.FormatNotReadyMessage(readinessCandidates, _vpn);
+                throw new VpnTunnelNotReadyException(diagnostics, VpnConnectBudget.VpnAdapterReadinessMs);
+            }
+
+            VpnAdapterReadiness.ValidateOwnedRouteOrThrow(selection);
+            _vpnAdapterSelection = selection;
+            _vpnAdapter = VpnAdapterSelector.FindAdapter(AdapterCatalog.All(), selection)
+                ?? throw new InvalidOperationException("Selected VPN adapter disappeared before route setup.");
+            Log(_vpnAdapterSelection.FormatLogLine());
+
+            int ifIndex = selection.IfIndex;
+            string gw = selection.Gateway;
+            var desired = new List<OwnedRoute> { RouteReconciler.TransportDefault(ifIndex, gw) };
+            RouteOwnership.Apply(RouteReconciler.Plan(desired, _owned), _owned, Log);
+            PersistCrash();
+
+            _proxy = new TransparentTcpProxy
+            {
+                VpnInterfaceIndex = ifIndex,
+                VpnInterfaceName = _vpnAdapter.Name,
+                BindOutboundToVpn = true,
+            };
+            await _proxy.StartAsync(IPAddress.Loopback, 0, _serviceCts.Token).ConfigureAwait(false);
+            Log("proxy-started port=" + _proxy.Port);
+
+            _driver = CalloutDriverClient.TryOpen();
+            if (_driver.IsLoaded)
+            {
+                _driver.TrySetRedirectTarget(Environment.ProcessId, (ushort)_proxy.Port, out string err);
+                if (err.Length > 0)
+                {
+                    Log(err);
+                }
+            }
+            else
+            {
+                Log("Callout driver not loaded. Transparent per-process TCP requires the KMDF driver. SOCKS/Probe --via-proxy still tests VPN-bound sockets.");
+            }
+
+            _wfp = new WfpSession();
+            try
+            {
+                _wfp.Open(_driver.IsLoaded);
+            }
+            catch (Exception ex)
+            {
+                Log("WFP engine open failed: " + ex.Message);
+            }
+
+            await RefreshPolicyAsync().ConfigureAwait(false);
+            Log("wfp-policy-applied");
+
+            _loopCts = new CancellationTokenSource();
+            _ = Task.Run(() => ReconcileLoop(_loopCts.Token), _loopCts.Token);
+            Log("connect-complete elapsedMs=" + elapsed.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
-            Log("openvpn-start-failed error=" + ex.Message);
+            Log("connect-failed error=" + ex.Message);
+            await DisconnectAsync().ConfigureAwait(false);
             throw;
         }
-
-        Log("openvpn-started pid=" + (_vpn.Pid?.ToString() ?? "?"));
-
-        AdapterView? vpnNic = null;
-        for (int i = 0; i < 25 && vpnNic is null; i++)
-        {
-            vpnNic = AdapterCatalog.GuessVpn(_beforeConnect, AdapterCatalog.All());
-            if (vpnNic is null)
-            {
-                await Task.Delay(200, ct).ConfigureAwait(false);
-            }
-        }
-
-        _vpnAdapter = vpnNic ?? throw new InvalidOperationException("Could not detect OpenVPN tunnel adapter.");
-        Log("adapter-detected name=" + _vpnAdapter.Name + " ifIndex=" + (_vpnAdapter.Ipv4Index?.ToString() ?? "—"));
-
-        string? gw = _vpn.RouteGateway ?? GatewayGuess.FromAdapter(_vpnAdapter);
-        if (gw is null || _vpnAdapter.Ipv4Index is not int ifIndex)
-        {
-            throw new InvalidOperationException("VPN adapter has no IPv4/gateway.");
-        }
-
-        var desired = new List<OwnedRoute> { RouteReconciler.TransportDefault(ifIndex, gw) };
-        RouteOwnership.Apply(RouteReconciler.Plan(desired, _owned), _owned, Log);
-        PersistCrash();
-
-        _proxy = new TransparentTcpProxy
-        {
-            VpnInterfaceIndex = ifIndex,
-            VpnInterfaceName = _vpnAdapter.Name,
-            BindOutboundToVpn = true,
-        };
-        await _proxy.StartAsync(IPAddress.Loopback, 0, _serviceCts.Token).ConfigureAwait(false);
-        Log("proxy-started port=" + _proxy.Port);
-
-        _driver = CalloutDriverClient.TryOpen();
-        if (_driver.IsLoaded)
-        {
-            _driver.TrySetRedirectTarget(Environment.ProcessId, (ushort)_proxy.Port, out string err);
-            if (err.Length > 0)
-            {
-                Log(err);
-            }
-        }
-        else
-        {
-            Log("Callout driver not loaded. Transparent per-process TCP requires the KMDF driver. SOCKS/Probe --via-proxy still tests VPN-bound sockets.");
-        }
-
-        _wfp = new WfpSession();
-        try
-        {
-            _wfp.Open(_driver.IsLoaded);
-        }
-        catch (Exception ex)
-        {
-            Log("WFP engine open failed: " + ex.Message);
-        }
-
-        await RefreshPolicyAsync().ConfigureAwait(false);
-        Log("wfp-policy-applied");
-
-        _loopCts = new CancellationTokenSource();
-        _ = Task.Run(() => ReconcileLoop(_loopCts.Token), _loopCts.Token);
-        Log("connect-complete elapsedMs=" + elapsed.ElapsedMilliseconds);
     }
 
     public async Task DisconnectAsync()
@@ -208,6 +214,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
         }
 
         _vpnAdapter = null;
+        _vpnAdapterSelection = null;
         ConfigSerializer.ClearCrashState(AppPaths.CrashStateFile);
         _paused = false;
     }
@@ -354,9 +361,27 @@ public sealed partial class RouterEngine : IAsyncDisposable
             Log("WFP policy unhealthy: " + (applyResult.LastError ?? "unknown"));
         }
 
+        if (_vpnAdapterSelection is not null)
+        {
+            if (!VpnAdapterReadiness.TryValidateOwnedRoute(_vpnAdapterSelection, out string? routeError))
+            {
+                Log("Skipping owned routes: " + routeError);
+                return;
+            }
+        }
+
         if (_vpnAdapter?.Ipv4Index is int ifIndex)
         {
-            string gw = _vpn?.RouteGateway ?? GatewayGuess.FromAdapter(_vpnAdapter) ?? "0.0.0.0";
+            string gw = _vpnAdapterSelection?.Gateway
+                ?? _vpn?.RouteGateway
+                ?? GatewayGuess.FromAdapter(_vpnAdapter)
+                ?? "0.0.0.0";
+            if (_vpnAdapterSelection is not null && !VpnTunnelIpv4Rules.IsGatewayCompatible(_vpnAdapterSelection.SelectedAddress, gw))
+            {
+                Log("Skipping owned routes: gateway " + gw + " is not compatible with selected tunnel IPv4.");
+                return;
+            }
+
             IReadOnlyList<OwnedRoute> dest = DestinationRoutePlanner.PlanVpnDestinations(cfg.Rules, ifIndex, gw, _dns.Snapshot());
             var desired = new List<OwnedRoute> { RouteReconciler.TransportDefault(ifIndex, gw) };
             desired.AddRange(dest);
@@ -419,6 +444,17 @@ public sealed partial class RouterEngine : IAsyncDisposable
             Ipv4Index = nic.Ipv4Index,
             Ipv4 = nic.Ipv4,
             Ipv6 = nic.Ipv6,
+        };
+
+    private static VpnAdapterSelectionDiagnostics? ToSelectionDiagnostics(VpnAdapterSelection? selection)
+        => selection is null ? null : new VpnAdapterSelectionDiagnostics
+        {
+            IfIndex = selection.IfIndex,
+            Name = selection.Name,
+            Ipv4 = selection.SelectedAddress.Address + "/" + selection.SelectedAddress.PrefixLength,
+            Ipv4State = selection.SelectedAddress.DadState.ToString(),
+            Gateway = selection.Gateway,
+            SelectionReason = selection.SelectionReason,
         };
 
     private static AdapterView? PickDirect(IReadOnlyList<AdapterView> nics)

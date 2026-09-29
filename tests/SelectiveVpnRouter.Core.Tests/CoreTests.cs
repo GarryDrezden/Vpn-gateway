@@ -1,5 +1,7 @@
 using System.Net;
+using System.Net.NetworkInformation;
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Network;
 using Xunit;
 
 namespace SelectiveVpnRouter.Core.Tests;
@@ -272,7 +274,8 @@ public class IpcTimeoutTests
     [Fact]
     public void ConnectVpn_uses_long_timeout()
     {
-        Assert.Equal(90_000, IpcTimeouts.OperationTimeoutMs(IpcMethods.ConnectVpn));
+        Assert.Equal(IpcTimeouts.ConnectVpnMs, IpcTimeouts.OperationTimeoutMs(IpcMethods.ConnectVpn));
+        Assert.Equal(85_000, IpcTimeouts.ConnectVpnMs);
     }
 
     [Fact]
@@ -487,5 +490,231 @@ public class PreferredDefaultTests
         Assert.True(stolen.IsVpnAdapter && stolen.Metric < 5000);
         Assert.False(ownedFallback.IsVpnAdapter && ownedFallback.Metric < 5000);
         Assert.False(direct.IsVpnAdapter && direct.Metric < 5000);
+    }
+}
+
+public class ConnectVpnTimeoutArchitectureTests
+{
+    private static string? FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "SelectiveVpnRouter.sln")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        return null;
+    }
+
+    [Fact]
+    public void ConnectVpn_ipc_timeout_exceeds_openvpn_plus_readiness_budget()
+    {
+        int connectVpnMs = IpcTimeouts.OperationTimeoutMs(IpcMethods.ConnectVpn);
+        int simulatedReadinessMs = 12_000;
+        int worstCaseMs = VpnConnectBudget.OpenVpnStartupMs + simulatedReadinessMs + VpnConnectBudget.ConnectVpnSetupMs;
+
+        Assert.True(connectVpnMs > worstCaseMs);
+        Assert.True(connectVpnMs > VpnConnectBudget.OpenVpnStartupMs + VpnConnectBudget.VpnAdapterReadinessMs);
+        Assert.NotEqual(IpcTimeouts.ShortOperationMs, connectVpnMs);
+    }
+
+    [Fact]
+    public void Readiness_timeout_message_reaches_gui_before_ipc_timeout()
+    {
+        int readinessMs = VpnConnectBudget.VpnAdapterReadinessMs;
+        int connectVpnMs = IpcTimeouts.OperationTimeoutMs(IpcMethods.ConnectVpn);
+        Assert.True(connectVpnMs > readinessMs + VpnConnectBudget.OpenVpnStartupMs + 5_000);
+
+        var candidates = new[]
+        {
+            new VpnAdapterReadinessCandidate(
+                "tap",
+                "TAP",
+                "TAP-Windows Adapter",
+                OperationalStatus.Up,
+                8,
+                [new Ipv4TunnelAddress("169.254.1.2", 16, Ipv4DadState.Preferred)],
+                true,
+                true,
+                true),
+        };
+
+        string message = VpnAdapterReadiness.FormatNotReadyDiagnostics(candidates, "10.28.0.1", "10.28.0.2");
+        Assert.StartsWith("VPN tunnel adapter is not ready after 15s.", message, StringComparison.Ordinal);
+        Assert.Contains("OpenVPN connected, but no usable tunnel IPv4 became available.", message, StringComparison.Ordinal);
+        Assert.Contains("candidate if=8", message, StringComparison.Ordinal);
+        Assert.True(VpnTunnelNotReadyException.IsReadinessFailureMessage(message));
+    }
+
+    [Fact]
+    public async Task WaitForReady_respects_service_shutdown_token()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            VpnAdapterSelector.WaitForReadyAsync([], new OpenVpnController(), TimeSpan.FromSeconds(15), cts.Token));
+    }
+
+    [Fact]
+    public void RouterEngine_connect_failure_rolls_back_via_disconnect()
+    {
+        string path = Path.Combine(FindRepoRoot()!, "src", "SelectiveVpnRouter.Service", "RouterEngine.cs");
+        string text = File.ReadAllText(path);
+        Assert.Contains("Log(\"connect-failed error=\" + ex.Message);", text, StringComparison.Ordinal);
+        Assert.Contains("await DisconnectAsync().ConfigureAwait(false);", text, StringComparison.Ordinal);
+        Assert.Contains("VpnTunnelNotReadyException", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetStatus_keeps_short_ipc_timeout()
+    {
+        Assert.Equal(IpcTimeouts.ShortOperationMs, IpcTimeouts.OperationTimeoutMs(IpcMethods.GetStatus));
+    }
+
+    [Fact]
+    public void ConnectVpn_double_start_is_guarded()
+    {
+        string? repoRoot = FindRepoRoot();
+        Assert.NotNull(repoRoot);
+
+        string mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src", "SelectiveVpnRouter.App", "MainWindow.xaml.cs"));
+        Assert.Contains("if (_connectUiActive)", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("ConnectVpnButton.IsEnabled = !busy;", mainWindow, StringComparison.Ordinal);
+
+        string pipeHost = File.ReadAllText(Path.Combine(repoRoot, "src", "SelectiveVpnRouter.Service", "PipeIpcHost.cs"));
+        Assert.Contains("_connectGate", pipeHost, StringComparison.Ordinal);
+        Assert.Contains("VPN connect is already in progress.", pipeHost, StringComparison.Ordinal);
+        Assert.Contains("ServiceCancellationToken", pipeHost, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ServiceClient_uses_async_frame_io_for_operation_timeout()
+    {
+        string path = Path.Combine(FindRepoRoot()!, "src", "SelectiveVpnRouter.App", "ServiceClient.cs");
+        string text = File.ReadAllText(path);
+        Assert.Contains("ReadExactlyAsync", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("reader.ReadInt32()", text, StringComparison.Ordinal);
+    }
+}
+
+public class WindowsUnicastAddressCatalogRegressionTests
+{
+    private static string CatalogSourcePath()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            string path = Path.Combine(dir.FullName, "src", "SelectiveVpnRouter.Network", "WindowsUnicastAddressCatalog.cs");
+            if (File.Exists(path))
+            {
+                return path;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException("WindowsUnicastAddressCatalog.cs not found.");
+    }
+
+    [Fact]
+    public void Catalog_source_has_no_unsafe_getadaptersaddresses_parsing()
+    {
+        string text = File.ReadAllText(CatalogSourcePath());
+        Assert.DoesNotContain("GetAdaptersAddresses", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("PtrToStructure", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("SocketAddressStorage", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("IpAdapterUnicastAddress", text, StringComparison.Ordinal);
+        Assert.Contains("NetworkInterface.GetAllNetworkInterfaces()", text, StringComparison.Ordinal);
+        Assert.Contains("DuplicateAddressDetectionState", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AdapterCatalog_All_can_be_called_repeatedly_on_windows()
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            IReadOnlyList<AdapterView> adapters = AdapterCatalog.All();
+            Assert.NotNull(adapters);
+        }
+
+        IReadOnlyList<RouteRow> defaults = RouteTable.DefaultRoutes();
+        Assert.NotNull(defaults);
+    }
+
+    [Fact]
+    public void Snapshot_route_diagnostics_do_not_use_unsafe_catalog_parsing()
+    {
+        string adapters = File.ReadAllText(CatalogSourcePath());
+        string engine = File.ReadAllText(Path.Combine(Path.GetDirectoryName(CatalogSourcePath())!, "..", "SelectiveVpnRouter.Service", "RouterEngine.cs"));
+        Assert.Contains("PreferredRoutes.PreferredDirectDefault()", engine, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetAdaptersAddresses", adapters, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(DuplicateAddressDetectionState.Preferred, Ipv4DadState.Preferred)]
+    [InlineData(DuplicateAddressDetectionState.Tentative, Ipv4DadState.Tentative)]
+    [InlineData(DuplicateAddressDetectionState.Duplicate, Ipv4DadState.Duplicate)]
+    [InlineData(DuplicateAddressDetectionState.Deprecated, Ipv4DadState.Deprecated)]
+    [InlineData(DuplicateAddressDetectionState.Invalid, Ipv4DadState.Invalid)]
+    public void DadState_mapping_matches_windows_network_information(
+        DuplicateAddressDetectionState input,
+        Ipv4DadState expected)
+    {
+        Assert.Equal(expected, WindowsUnicastAddressCatalog.MapDuplicateAddressDetectionState(input));
+    }
+
+    [Fact]
+    public void Apipa_preferred_still_rejected_by_readiness()
+    {
+        var candidate = new VpnAdapterReadinessCandidate(
+            "id-8",
+            "TAP",
+            "TAP",
+            OperationalStatus.Up,
+            8,
+            [new Ipv4TunnelAddress("169.254.32.155", 16, Ipv4DadState.Preferred)],
+            true,
+            true,
+            true);
+        Assert.False(VpnAdapterReadiness.TrySelectBest([candidate], "10.28.0.1", "10.28.0.7", [], out _, out _));
+    }
+
+    [Fact]
+    public void Tunnel_10_28_tentative_is_not_ready()
+    {
+        var candidate = new VpnAdapterReadinessCandidate(
+            "id-9",
+            "OpenVPN DCO",
+            "OpenVPN DCO",
+            OperationalStatus.Up,
+            9,
+            [new Ipv4TunnelAddress("10.28.0.2", 22, Ipv4DadState.Tentative)],
+            true,
+            true,
+            true);
+        Assert.False(VpnAdapterReadiness.TrySelectBest([candidate], "10.28.0.1", "10.28.0.2", [], out _, out _));
+    }
+
+    [Fact]
+    public void Tunnel_10_28_preferred_is_ready()
+    {
+        var candidate = new VpnAdapterReadinessCandidate(
+            "id-9",
+            "OpenVPN DCO",
+            "OpenVPN DCO",
+            OperationalStatus.Up,
+            9,
+            [new Ipv4TunnelAddress("10.28.0.7", 22, Ipv4DadState.Preferred)],
+            true,
+            true,
+            true);
+        Assert.True(VpnAdapterReadiness.TrySelectBest([candidate], "10.28.0.1", "10.28.0.7", [], out VpnAdapterSelection? sel, out _));
+        Assert.Equal(9, sel!.IfIndex);
     }
 }

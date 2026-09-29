@@ -1,6 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using SelectiveVpnRouter.Core;
 using SelectiveVpnRouter.Service;
+
+TextEncodingBootstrap.EnsureRegistered();
 
 string mode = args.FirstOrDefault() ?? "";
 if (mode is "--help" or "-h")

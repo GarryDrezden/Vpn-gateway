@@ -101,6 +101,52 @@
                   </WrapPanel>
                   <TextBlock x:Name="RealAppStatusLine" TextWrapping="Wrap" FontWeight="SemiBold" Text="Статус: правило не активно"/>
                   <TextBlock x:Name="RealAppDetailLine" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="#4B5563" Text=""/>
+                  <TextBlock x:Name="RealAppTargetStatusLine" TextWrapping="Wrap" Margin="0,6,0,0" FontWeight="SemiBold" Text="Цель: —"/>
+                  <TextBlock Text="External IP verification: manual" Margin="0,2,0,0" Foreground="#6B7280" FontStyle="Italic"/>
+                  <TextBlock x:Name="RealAppQueriedAtLine" TextWrapping="Wrap" Margin="0,2,0,6" Foreground="#6B7280" Text=""/>
+                  <DockPanel Margin="0,0,0,4">
+                    <Button DockPanel.Dock="Right" Content="Определить адреса" Click="OnResolveRealAppTarget" MinWidth="140" Margin="8,0,0,0"/>
+                    <TextBox x:Name="RealAppTargetBox" Text="api.ipify.org:443" ToolTip="host:port для диагностики целевого TCP flow"/>
+                  </DockPanel>
+                  <TextBlock x:Name="RealAppResolvedTargetsLine" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="#4B5563" Text="Resolved: —"/>
+                  <CheckBox x:Name="RealAppTargetFilterOnly" Content="Только целевой адрес" Margin="0,0,0,6" Checked="OnRealAppTargetFilterChanged" Unchecked="OnRealAppTargetFilterChanged"/>
+                  <TextBlock FontWeight="SemiBold" Text="Последние соединения выбранного приложения"/>
+                  <DataGrid x:Name="RealAppFlowGrid"
+                            Margin="0,4,0,0"
+                            Height="260"
+                            AutoGenerateColumns="False"
+                            IsReadOnly="True"
+                            CanUserAddRows="False"
+                            CanUserDeleteRows="False"
+                            CanUserReorderColumns="False"
+                            HeadersVisibility="Column"
+                            GridLinesVisibility="Horizontal"
+                            SelectionMode="Single"
+                            ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <DataGrid.RowStyle>
+                      <Style TargetType="DataGridRow">
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding IsTarget}" Value="True">
+                            <Setter Property="Background" Value="#E0F2FE"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.Columns>
+                      <DataGridTextColumn Header="Time" Binding="{Binding UpdatedAt}" Width="70"/>
+                      <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="55"/>
+                      <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="150"/>
+                      <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="90"/>
+                      <DataGridTextColumn Header="WFP" Binding="{Binding Wfp}" Width="40"/>
+                      <DataGridTextColumn Header="Proxy" Binding="{Binding Proxy}" Width="50"/>
+                      <DataGridTextColumn Header="Context" Binding="{Binding Context}" Width="60"/>
+                      <DataGridTextColumn Header="Bound" Binding="{Binding Bound}" Width="55"/>
+                      <DataGridTextColumn Header="Connected" Binding="{Binding Connected}" Width="75"/>
+                      <DataGridTextColumn Header="Route" Binding="{Binding Route}" Width="60"/>
+                      <DataGridTextColumn Header="Error" Binding="{Binding Error}" Width="*"/>
+                    </DataGrid.Columns>
+                  </DataGrid>
                   <Expander Header="Advanced diagnostics" Margin="0,8,0,0">
                     <TextBlock x:Name="RealAppAdvancedLine" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Text=""/>
                   </Expander>

@@ -4,7 +4,7 @@ This is an MVP foundation, not a finished consumer VPN client.
 
 ## Transparent per-process TCP (verified on Windows x64)
 
-End-to-end TCP path is verified: Application rule → WFP ALE APP_ID → connect-redirect callout → localhost proxy → redirect context → VPN-bound outbound. Test Center **Test transparent routing** is the automated Probe acceptance test. **Проверка реального приложения** adds a temporary APP_ID rule for any user-selected `.exe` and observes WFP/proxy flows; it does **not** automatically prove external IP for arbitrary GUI apps.
+End-to-end TCP path is verified: Application rule → WFP ALE APP_ID → connect-redirect callout → localhost proxy → redirect context → VPN-bound outbound. Test Center **Test transparent routing** is the automated Probe acceptance test. **Проверка реального приложения** adds a temporary APP_ID rule for any user-selected `.exe` and observes WFP/proxy flows. Milestone `browser-vpn-egress-pass-v1` verified real Chrome HTTPS egress to VPN public IP while Direct traffic without the rule stays Direct; target flow matching (`api.ipify.org:443`) PASS even when background Chrome flows exist.
 
 You still need a **built and loaded** callout (`scripts\build-driver.ps1`, `scripts\check-driver.ps1` → `\\.\SelectiveVpnCallout`). Without the driver, Application rules cannot transparently hijack TCP connects.
 

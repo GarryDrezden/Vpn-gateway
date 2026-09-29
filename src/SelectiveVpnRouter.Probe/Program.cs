@@ -8,6 +8,7 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
     Console.WriteLine("""
         SelectiveVpnRouter.Probe
           --show-network
+          --smoke-network-catalog
           --tcp HOST PORT
           --http URL
           --dns HOST
@@ -23,6 +24,11 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
         --spawn starts another executable (policy follows that child, not this parent).
         """);
     return 0;
+}
+
+if (args.Contains("--smoke-network-catalog"))
+{
+    return RunNetworkCatalogSmoke();
 }
 
 if (args.Length >= 2 && args[0] == "--spawn")
@@ -69,15 +75,7 @@ Console.WriteLine("pid " + Environment.ProcessId);
 
 if (args.Contains("--show-network"))
 {
-    foreach (AdapterView nic in AdapterCatalog.All())
-    {
-        Console.WriteLine($"{nic.Name} [{nic.Status}] if4={nic.Ipv4Index} {string.Join(",", nic.Ipv4)} | {nic.Description}");
-    }
-
-    foreach (RouteRow r in RouteTable.DefaultRoutes())
-    {
-        Console.WriteLine($"default {r.Destination}/{r.Mask} via {r.NextHop} if {r.InterfaceIndex} metric {r.Metric}");
-    }
+    PrintNetworkCatalog();
 }
 
 if (args.Contains("--watch"))
@@ -271,5 +269,36 @@ static async Task RecvExact(Socket socket, byte[] buf)
         }
 
         got += n;
+    }
+}
+
+static int RunNetworkCatalogSmoke()
+{
+    Console.WriteLine("network-catalog-smoke: start");
+    for (int pass = 1; pass <= 5; pass++)
+    {
+        IReadOnlyList<AdapterView> adapters = AdapterCatalog.All();
+        IReadOnlyList<RouteRow> defaults = RouteTable.DefaultRoutes();
+        Console.WriteLine($"pass={pass} adapters={adapters.Count} defaultRoutes={defaults.Count}");
+    }
+
+    PrintNetworkCatalog();
+    Console.WriteLine("network-catalog-smoke: PASS");
+    return 0;
+}
+
+static void PrintNetworkCatalog()
+{
+    foreach (AdapterView nic in AdapterCatalog.All())
+    {
+        string addrs = string.Join(
+            ", ",
+            nic.Ipv4TunnelAddresses.Select(a => a.Address + "/" + a.PrefixLength + " " + a.DadState));
+        Console.WriteLine($"{nic.Name} [{nic.Status}] if4={nic.Ipv4Index} ipv4=[{addrs}] | {nic.Description}");
+    }
+
+    foreach (RouteRow r in RouteTable.DefaultRoutes())
+    {
+        Console.WriteLine($"default {r.Destination}/{r.Mask} via {r.NextHop} if {r.InterfaceIndex} metric {r.Metric}");
     }
 }

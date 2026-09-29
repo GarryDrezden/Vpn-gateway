@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using SelectiveVpnRouter.Core;
 
@@ -13,7 +14,8 @@ public sealed record AdapterView(
     int? Ipv4Index,
     int? Ipv6Index,
     IReadOnlyList<string> Ipv4,
-    IReadOnlyList<string> Ipv6);
+    IReadOnlyList<string> Ipv6,
+    IReadOnlyList<Ipv4TunnelAddress> Ipv4TunnelAddresses);
 
 public sealed record RouteRow(
     IPAddress Destination,
@@ -35,41 +37,44 @@ public static class AdapterCatalog
                 continue;
             }
 
+            AdapterView? view = TryBuildAdapterView(nic);
+            if (view is not null)
+            {
+                list.Add(view);
+            }
+        }
+
+        return list;
+    }
+
+    private static AdapterView? TryBuildAdapterView(NetworkInterface nic)
+    {
+        try
+        {
             IPInterfaceProperties props = nic.GetIPProperties();
             int? v4 = Try(() => props.GetIPv4Properties().Index);
             int? v6 = Try(() => props.GetIPv6Properties().Index);
-            list.Add(new AdapterView(
+            IReadOnlyList<Ipv4TunnelAddress> tunnelAddresses = WindowsUnicastAddressCatalog.ReadManagedUnicast(props);
+            return new AdapterView(
                 nic.Id,
                 nic.Name,
                 nic.Description,
                 nic.OperationalStatus,
                 v4,
                 v6,
-                props.UnicastAddresses.Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                    .Select(a => a.Address.ToString()).ToList(),
+                tunnelAddresses.Select(a => a.Address).ToList(),
                 props.UnicastAddresses.Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
-                    .Select(a => a.Address.ToString()).ToList()));
+                    .Select(a => a.Address.ToString()).ToList(),
+                tunnelAddresses);
         }
-
-        return list;
-    }
-
-    public static AdapterView? GuessVpn(IReadOnlyList<AdapterView> before, IReadOnlyList<AdapterView> after)
-    {
-        foreach (AdapterView nic in after.Where(a => a.Status == OperationalStatus.Up))
+        catch (NetworkInformationException)
         {
-            AdapterView? prev = before.FirstOrDefault(b => string.Equals(b.Id, nic.Id, StringComparison.OrdinalIgnoreCase));
-            bool looks = LooksVpn(nic.Name) || LooksVpn(nic.Description);
-            bool newborn = prev is null;
-            bool cameUp = prev is not null && prev.Status != OperationalStatus.Up && nic.Ipv4.Count > 0;
-            bool ipChanged = prev is not null && !prev.Ipv4.SequenceEqual(nic.Ipv4) && nic.Ipv4.Count > 0;
-            if (newborn || cameUp || (looks && ipChanged) || (looks && prev is null))
-            {
-                return nic;
-            }
+            return null;
         }
-
-        return after.FirstOrDefault(a => a.Status == OperationalStatus.Up && (LooksVpn(a.Name) || LooksVpn(a.Description)));
+        catch (SocketException)
+        {
+            return null;
+        }
     }
 
     public static bool LooksVpn(string text)

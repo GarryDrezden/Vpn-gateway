@@ -21,12 +21,24 @@ public static class DriverEnvironment
 {
     public static string? FindSys()
     {
-        string[] candidates =
-        [
+        var candidates = new List<string>
+        {
             Path.Combine(AppContext.BaseDirectory, "SelectiveVpnCallout.sys"),
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "artifacts", "driver", "Release", "SelectiveVpnCallout.sys")),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "drivers", "SelectiveVpnCallout.sys"),
-        ];
+        };
+
+        string? repoRelease = RepoPathResolver.ResolveRepoRelativePath("artifacts", "driver", "Release", "SelectiveVpnCallout.sys");
+        if (repoRelease is not null)
+        {
+            candidates.Add(repoRelease);
+        }
+
+        string? repoDebug = RepoPathResolver.ResolveRepoRelativePath("artifacts", "driver", "Debug", "SelectiveVpnCallout.sys");
+        if (repoDebug is not null)
+        {
+            candidates.Add(repoDebug);
+        }
+
         return candidates.FirstOrDefault(File.Exists);
     }
 
