@@ -19,7 +19,19 @@ public static class WfpPolicyHealth
     {
         string fullPath = Path.GetFullPath(exePath);
         return policy.Filters.FirstOrDefault(f =>
-            f.IsCalloutFilter && string.Equals(f.ExePath, fullPath, StringComparison.OrdinalIgnoreCase));
+            f.IsCalloutFilter
+            && string.Equals(f.ExePath, fullPath, StringComparison.OrdinalIgnoreCase)
+            && !f.IsShortPathFallback)
+            ?? policy.Filters.FirstOrDefault(f =>
+                f.IsCalloutFilter && string.Equals(f.ExePath, fullPath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static IReadOnlyList<WfpFilterInstallResult> FindCalloutFilters(WfpPolicyDiagnostics policy, string exePath)
+    {
+        string fullPath = Path.GetFullPath(exePath);
+        return policy.Filters
+            .Where(f => f.IsCalloutFilter && string.Equals(f.ExePath, fullPath, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
     }
 
     public static string DescribeStatus(uint status) =>
@@ -32,10 +44,20 @@ public static class WfpPolicyHealth
         };
 
     public static string FormatFilterLine(WfpFilterInstallResult filter) =>
-        $"exe={filter.ExePath} fileExists={filter.FileExists} appIdResolved={filter.AppIdResolved} " +
+        $"exe={filter.ExePath} identity={filter.IdentityPathUsed} shortFallback={filter.IsShortPathFallback} " +
+        $"fileExists={filter.FileExists} appIdResolved={filter.AppIdResolved} " +
         $"appIdStatus=0x{filter.AppIdStatus:X8} ({DescribeStatus(filter.AppIdStatus)}) " +
         $"filterInstalled={filter.FilterInstalled} " +
         $"filterAddStatus=0x{filter.FilterAddStatus:X8} ({DescribeStatus(filter.FilterAddStatus)}) " +
         $"filterId={filter.FilterId}" +
         (filter.Error is null ? "" : " error=" + filter.Error);
+
+    public static string SummarizeCalloutFilters(IEnumerable<WfpFilterInstallResult> filters)
+    {
+        var parts = filters
+            .Where(f => f.IsCalloutFilter)
+            .Select(f => (f.IsShortPathFallback ? "short" : "long") + ":id=" + f.FilterId + ",identity=" + f.IdentityPathUsed)
+            .ToArray();
+        return parts.Length == 0 ? "(none)" : string.Join("; ", parts);
+    }
 }

@@ -11,7 +11,7 @@ namespace SelectiveVpnRouter.Network;
 /// optional callout filters when the KMDF driver is loaded.
 /// Connect redirect classify lives in kernel; this class only adds/removes objects.
 /// </summary>
-public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
+public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilterInstaller, IDisposable
 {
     public static readonly Guid ProviderKey = new("6b3d1f8a-7c2e-4b91-9e44-a1f0c3d5e607");
     public static readonly Guid SublayerKey = new("6b3d1f8a-7c2e-4b91-9e44-a1f0c3d5e608");
@@ -51,50 +51,107 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
         }
     }
 
-    public WfpPolicyApplyResult ReplaceVpnAppFilters(IReadOnlyList<string> exePaths, Ipv6Policy ipv6)
+    public WfpPolicyApplyResult ReplaceVpnAppFilters(
+        IReadOnlyList<string> exePaths,
+        Ipv6Policy ipv6,
+        WfpAppFilterOptions? options = null)
     {
         ClearFilters();
+        options ??= new WfpAppFilterOptions();
         var results = new List<WfpFilterInstallResult>();
+
         foreach (string exe in exePaths)
         {
-            string fullPath = Path.GetFullPath(exe);
-            if (_driverPresent)
+            string displayPath = WfpAppIdentity.GetDisplayPath(exe);
+            bool useIdentityOverride = ShouldApplyIdentityOverride(exe, options, exePaths.Count);
+            string identityInput = useIdentityOverride ? options.WfpIdentitySourceOverride! : exe;
+            WfpAppIdentityPathMode identityMode = useIdentityOverride
+                ? options.IdentityPathMode
+                : WfpAppIdentityPathMode.Default;
+            foreach (string identityPath in WfpAppIdentity.GetIdentityPaths(identityInput, identityMode))
             {
-                results.Add(InstallAppCalloutFilter(fullPath));
-            }
+                bool shortFallback = IsShortPathFallback(displayPath, identityPath);
+                if (_driverPresent)
+                {
+                    results.Add(InstallAppCalloutFilter(identityPath, displayPath, shortFallback));
+                }
 
-            if (ipv6 is Ipv6Policy.BlockForVpnRoutedApps)
-            {
-                results.Add(InstallIpv6BlockFilter(fullPath));
+                if (ipv6 is Ipv6Policy.BlockForVpnRoutedApps)
+                {
+                    results.Add(InstallIpv6BlockFilter(identityPath, displayPath, shortFallback));
+                }
             }
         }
 
-        int installed = results.Count(r => r.IsCalloutFilter && r.FilterInstalled);
+        int installedCallout = results.Count(r => r.IsCalloutFilter && r.FilterInstalled);
+        bool eachAppHasCallout = exePaths.All(exe =>
+        {
+            string display = WfpAppIdentity.GetDisplayPath(exe);
+            return results.Any(r =>
+                r.IsCalloutFilter
+                && r.FilterInstalled
+                && string.Equals(r.ExePath, display, StringComparison.OrdinalIgnoreCase));
+        });
+
         var apply = new WfpPolicyApplyResult
         {
             Filters = results,
             RequestedVpnApps = exePaths.Count,
-            InstalledAppFilters = installed,
+            InstalledAppFilters = installedCallout,
             DriverPresent = _driverPresent,
             SessionOpen = _engine != IntPtr.Zero,
-            PolicyHealthy = exePaths.Count == 0 || installed >= exePaths.Count,
-            LastError = BuildLastError(exePaths.Count, installed, results),
+            PolicyHealthy = exePaths.Count == 0 || eachAppHasCallout,
+            LastError = BuildLastError(exePaths, eachAppHasCallout, results),
         };
         return apply;
     }
 
-    private static string? BuildLastError(int requested, int installed, IReadOnlyList<WfpFilterInstallResult> results)
+    private static bool ShouldApplyIdentityOverride(string exe, WfpAppFilterOptions options, int exePathCount)
     {
-        if (requested == 0 || installed >= requested)
+        if (string.IsNullOrWhiteSpace(options.WfpIdentitySourceOverride))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.WfpIdentityOverrideExePath))
+        {
+            return string.Equals(
+                WfpAppIdentity.GetDisplayPath(exe),
+                WfpAppIdentity.GetDisplayPath(options.WfpIdentityOverrideExePath),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        return exePathCount == 1;
+    }
+
+    private static bool IsShortPathFallback(string displayPath, string identityPath)
+    {
+        if (WfpAppIdentity.PathsEquivalent(displayPath, identityPath))
+        {
+            return false;
+        }
+
+        return WfpAppIdentity.ContainsNonAscii(displayPath)
+            && !WfpAppIdentity.ContainsNonAscii(identityPath);
+    }
+
+    private static string? BuildLastError(
+        IReadOnlyList<string> requestedPaths,
+        bool eachAppHasCallout,
+        IReadOnlyList<WfpFilterInstallResult> results)
+    {
+        if (requestedPaths.Count == 0 || eachAppHasCallout)
         {
             return null;
         }
 
         WfpFilterInstallResult? failed = results.FirstOrDefault(r => r.IsCalloutFilter && !r.FilterInstalled);
         return failed is null
-            ? $"Installed {installed}/{requested} callout app filters."
+            ? "At least one VPN app has no installed callout filter."
             : WfpPolicyHealth.FormatFilterLine(failed);
     }
+
+    public bool SessionOpen => _engine != IntPtr.Zero;
 
     public void ClearFilters()
     {
@@ -105,6 +162,159 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
         }
 
         _filters.Clear();
+    }
+
+    public bool TryAddRuntimeAppIdCaptureFilter(out WfpRuntimeCaptureFilterResult result)
+        => TryAddRuntimeAppIdCaptureFilter(3, WfpRuntimeAppIdCapture.DiagnosticRemoteAddressUInt32, out result);
+
+    public bool TryAddRuntimeAppIdCaptureFilterWithAppId(
+        IntPtr fwpmAppIdBlobPtr,
+        out WfpRuntimeCaptureFilterResult result)
+        => TryAddRuntimeAppIdCaptureFilterWithAppId(
+            fwpmAppIdBlobPtr,
+            WfpRuntimeAppIdCapture.DiagnosticRemoteAddressUInt32,
+            out result);
+
+    public bool TryAddRuntimeAppIdCaptureFilterWithAppId(
+        IntPtr fwpmAppIdBlobPtr,
+        uint remoteAddressUInt32,
+        out WfpRuntimeCaptureFilterResult result)
+    {
+        if (_engine == IntPtr.Zero)
+        {
+            result = new WfpRuntimeCaptureFilterResult(
+                0,
+                0,
+                Guid.Empty,
+                "Production WFP session is not open.");
+            return false;
+        }
+
+        if (fwpmAppIdBlobPtr == IntPtr.Zero)
+        {
+            result = new WfpRuntimeCaptureFilterResult(0, 0, Guid.Empty, "APP_ID blob is null.");
+            return false;
+        }
+
+        var appIdConditionValue = FWP_CONDITION_VALUE0.FromByteBlobPointer(fwpmAppIdBlobPtr);
+        WfpAppIdConditionValidation validation = WfpAppIdConditionDiagnostics.ValidateAppIdCondition(
+            ConditionAleAppId,
+            (uint)FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+            (uint)appIdConditionValue.type,
+            fwpmAppIdBlobPtr);
+        if (!validation.IsValid)
+        {
+            result = new WfpRuntimeCaptureFilterResult(
+                0,
+                0,
+                Guid.Empty,
+                validation.Error + " " + validation.DiagnosticLine);
+            return false;
+        }
+
+        FWPM_FILTER_CONDITION0[] conditions =
+        [
+            BuildRuntimeCaptureUint8Condition(WfpConstants.ConditionIpProtocol, 6),
+            BuildRuntimeCaptureUint16Condition(WfpConstants.ConditionIpRemotePort, WfpRuntimeAppIdCapture.DiagnosticRemotePort),
+            BuildRuntimeCaptureUint32Condition(WfpConstants.ConditionIpRemoteAddress, remoteAddressUInt32),
+            new FWPM_FILTER_CONDITION0
+            {
+                fieldKey = ConditionAleAppId,
+                matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+                conditionValue = appIdConditionValue,
+            },
+        ];
+
+        return TryAddRuntimeCaptureFilterWithConditions(conditions, out result);
+    }
+
+    public bool TryAddRuntimeAppIdCaptureFilter(
+        int conditionCount,
+        uint remoteAddressUInt32,
+        out WfpRuntimeCaptureFilterResult result)
+    {
+        if (_engine == IntPtr.Zero)
+        {
+            result = new WfpRuntimeCaptureFilterResult(
+                0,
+                0,
+                Guid.Empty,
+                "Production WFP session is not open.");
+            return false;
+        }
+
+        if (conditionCount is < 1 or > 3)
+        {
+            result = new WfpRuntimeCaptureFilterResult(
+                0,
+                0,
+                Guid.Empty,
+                "conditionCount must be 1..3.");
+            return false;
+        }
+
+        return TryAddRuntimeCaptureFilterWithConditions(
+            BuildRuntimeCaptureConditions(conditionCount, remoteAddressUInt32),
+            out result);
+    }
+
+    public static WfpRuntimeCaptureFilterSetup RuntimeCaptureFilterSetupTemplate { get; } = new(
+        LayerConnectRedirectV4,
+        SublayerKey,
+        CalloutV4Key,
+        WfpRuntimeAppIdCapture.FilterRawContext,
+        (uint)FWP_ACTION_TYPE.FWP_ACTION_CALLOUT_UNKNOWN,
+        "FWP_VALUE0.Empty (default weight)");
+
+    public void RemoveRuntimeAppIdCaptureFilter(Guid filterKey)
+    {
+        if (_engine == IntPtr.Zero || filterKey == Guid.Empty)
+        {
+            return;
+        }
+
+        Guid key = filterKey;
+        Native.FwpmFilterDeleteByKey0(_engine, ref key);
+    }
+
+    public IReadOnlyList<WfpRuntimeCaptureStepProbeResult> ProbeRuntimeCaptureFilterSteps()
+    {
+        if (_engine == IntPtr.Zero)
+        {
+            return [];
+        }
+
+        (string set, int count)[] steps =
+        [
+            ("A:IP_PROTOCOL", 1),
+            ("B:IP_PROTOCOL+IP_REMOTE_PORT", 2),
+            ("C:IP_PROTOCOL+IP_REMOTE_PORT+IP_REMOTE_ADDRESS", 3),
+        ];
+
+        var results = new List<WfpRuntimeCaptureStepProbeResult>(steps.Length);
+        foreach ((string set, int count) in steps)
+        {
+            FWPM_FILTER_CONDITION0[] conditions = BuildRuntimeCaptureConditions(count, WfpRuntimeAppIdCapture.DiagnosticRemoteAddressUInt32);
+            IReadOnlyList<string> conditionLog = WfpRuntimeCaptureConditionLayout.DescribeConditions(conditions);
+            if (!TryAddRuntimeCaptureFilterWithConditions(conditions, out WfpRuntimeCaptureFilterResult addResult))
+            {
+                results.Add(new WfpRuntimeCaptureStepProbeResult(
+                    set,
+                    addResult.FilterAddStatus,
+                    addResult.FilterId,
+                    conditionLog));
+                continue;
+            }
+
+            RemoveRuntimeAppIdCaptureFilter(addResult.FilterKey);
+            results.Add(new WfpRuntimeCaptureStepProbeResult(
+                set,
+                addResult.FilterAddStatus,
+                addResult.FilterId,
+                conditionLog));
+        }
+
+        return results;
     }
 
     public void Dispose()
@@ -130,7 +340,7 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
         var provider = new FWPM_PROVIDER0
         {
             providerKey = pk,
-            displayData = new FWPM_DISPLAY_DATA0 { name = "Selective VPN Router", description = "Owned WFP provider" },
+            displayData = new FWPM_DISPLAY_DATA0 { name = "VPN Route", description = "Owned WFP provider" },
         };
         Native.FwpmProviderAdd0(_engine, ref provider, IntPtr.Zero);
 
@@ -138,12 +348,148 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
         var sub = new FWPM_SUBLAYER0
         {
             subLayerKey = sk,
-            displayData = new FWPM_DISPLAY_DATA0 { name = "Selective VPN Router sublayer", description = "" },
+            displayData = new FWPM_DISPLAY_DATA0 { name = "VPN Route sublayer", description = "" },
             providerKey = IntPtr.Zero,
             weight = 0x8000,
         };
         Native.FwpmSubLayerAdd0(_engine, ref sub, IntPtr.Zero);
     }
+
+    private static FWPM_FILTER_CONDITION0[] BuildRuntimeCaptureConditions(int count, uint remoteAddressUInt32)
+    {
+        var all = new[]
+        {
+            BuildRuntimeCaptureUint8Condition(WfpConstants.ConditionIpProtocol, 6),
+            BuildRuntimeCaptureUint16Condition(WfpConstants.ConditionIpRemotePort, WfpRuntimeAppIdCapture.DiagnosticRemotePort),
+            BuildRuntimeCaptureUint32Condition(WfpConstants.ConditionIpRemoteAddress, remoteAddressUInt32),
+        };
+
+        if (count < 1 || count > all.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count));
+        }
+
+        var slice = new FWPM_FILTER_CONDITION0[count];
+        Array.Copy(all, slice, count);
+        return slice;
+    }
+
+    private bool TryAddRuntimeCaptureFilterWithConditions(
+        FWPM_FILTER_CONDITION0[] conditions,
+        out WfpRuntimeCaptureFilterResult result)
+    {
+        Guid filterKey = Guid.NewGuid();
+        int condSize = Marshal.SizeOf<FWPM_FILTER_CONDITION0>();
+        IntPtr condBlock = Marshal.AllocHGlobal(condSize * conditions.Length);
+        IntPtr providerKeyPtr = IntPtr.Zero;
+        IntPtr filterMem = IntPtr.Zero;
+        try
+        {
+            for (int i = 0; i < conditions.Length; i++)
+            {
+                Marshal.StructureToPtr(conditions[i], IntPtr.Add(condBlock, i * condSize), false);
+            }
+
+            providerKeyPtr = Marshal.AllocHGlobal(Marshal.SizeOf<Guid>());
+            Marshal.StructureToPtr(ProviderKey, providerKeyPtr, false);
+
+            var filter = default(FWPM_FILTER0);
+            filter.filterKey = filterKey;
+            filter.displayData = new FWPM_DISPLAY_DATA0
+            {
+                name = "SVR runtime APP_ID capture",
+                description = "Diagnostic TCP "
+                    + WfpRuntimeAppIdCapture.DiagnosticRemoteHost
+                    + ":"
+                    + WfpRuntimeAppIdCapture.DiagnosticRemotePort,
+            };
+            filter.providerKey = providerKeyPtr;
+            filter.layerKey = LayerConnectRedirectV4;
+            filter.subLayerKey = SublayerKey;
+            filter.action = new FWPM_ACTION0
+            {
+                type = FWP_ACTION_TYPE.FWP_ACTION_CALLOUT_UNKNOWN,
+                value = new FWPM_ACTION0_UNION { calloutKey = CalloutV4Key },
+            };
+            filter.numFilterConditions = (uint)conditions.Length;
+            filter.filterCondition = condBlock;
+            filter.weight = FWP_VALUE0.Empty;
+            filter.context = new FWPM_FILTER_CONTEXT0 { rawContext = WfpRuntimeAppIdCapture.FilterRawContext };
+
+            filterMem = Marshal.AllocHGlobal(Marshal.SizeOf<FWPM_FILTER0>());
+            Marshal.StructureToPtr(filter, filterMem, false);
+
+            uint filterAddStatus = Native.FwpmFilterAdd0(_engine, filterMem, IntPtr.Zero, out ulong filterId);
+            if (filterAddStatus != 0 || filterId == 0)
+            {
+                result = new WfpRuntimeCaptureFilterResult(
+                    filterAddStatus,
+                    filterId,
+                    Guid.Empty,
+                    "FwpmFilterAdd0 failed: " + WfpNativeStatus.Describe(filterAddStatus));
+                return false;
+            }
+
+            result = new WfpRuntimeCaptureFilterResult(filterAddStatus, filterId, filterKey, null);
+            return true;
+        }
+        finally
+        {
+            if (filterMem != IntPtr.Zero)
+            {
+                Marshal.DestroyStructure<FWPM_FILTER0>(filterMem);
+                Marshal.FreeHGlobal(filterMem);
+            }
+
+            for (int i = 0; i < conditions.Length; i++)
+            {
+                IntPtr slot = IntPtr.Add(condBlock, i * condSize);
+                Marshal.DestroyStructure<FWPM_FILTER_CONDITION0>(slot);
+            }
+
+            Marshal.FreeHGlobal(condBlock);
+            if (providerKeyPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(providerKeyPtr);
+            }
+        }
+    }
+
+    private static FWPM_FILTER_CONDITION0 BuildRuntimeCaptureUint8Condition(Guid fieldKey, byte value) =>
+        new()
+        {
+            fieldKey = fieldKey,
+            matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+            conditionValue = new FWP_CONDITION_VALUE0
+            {
+                type = FWP_DATA_TYPE.FWP_UINT8,
+                value = new FWP_VALUE0_UNION { uint8 = value },
+            },
+        };
+
+    private static FWPM_FILTER_CONDITION0 BuildRuntimeCaptureUint16Condition(Guid fieldKey, ushort value) =>
+        new()
+        {
+            fieldKey = fieldKey,
+            matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+            conditionValue = new FWP_CONDITION_VALUE0
+            {
+                type = FWP_DATA_TYPE.FWP_UINT16,
+                value = new FWP_VALUE0_UNION { uint16 = value },
+            },
+        };
+
+    private static FWPM_FILTER_CONDITION0 BuildRuntimeCaptureUint32Condition(Guid fieldKey, uint value) =>
+        new()
+        {
+            fieldKey = fieldKey,
+            matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+            conditionValue = new FWP_CONDITION_VALUE0
+            {
+                type = FWP_DATA_TYPE.FWP_UINT32,
+                value = new FWP_VALUE0_UNION { uint32 = value },
+            },
+        };
 
     private bool TryAddCallout()
     {
@@ -159,9 +505,11 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
         return st == 0 || st == 0x80320016; // already exists
     }
 
-    private WfpFilterInstallResult InstallAppCalloutFilter(string fullPath)
+    private WfpFilterInstallResult InstallAppCalloutFilter(string identityPath, string displayExePath, bool shortFallback)
         => InstallAppFilter(
-            fullPath,
+            identityPath,
+            displayExePath,
+            shortFallback,
             LayerConnectRedirectV4,
             new FWPM_ACTION0
             {
@@ -172,9 +520,11 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
             "Per-process TCP redirect",
             isCalloutFilter: true);
 
-    private WfpFilterInstallResult InstallIpv6BlockFilter(string fullPath)
+    private WfpFilterInstallResult InstallIpv6BlockFilter(string identityPath, string displayExePath, bool shortFallback)
         => InstallAppFilter(
-            fullPath,
+            identityPath,
+            displayExePath,
+            shortFallback,
             LayerAuthConnectV6,
             new FWPM_ACTION0
             {
@@ -186,59 +536,61 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
             isCalloutFilter: false);
 
     private WfpFilterInstallResult InstallAppFilter(
-        string fullPath,
+        string identityPath,
+        string displayExePath,
+        bool shortFallback,
         Guid layer,
         FWPM_ACTION0 action,
         string namePrefix,
         string description,
         bool isCalloutFilter)
     {
-        if (!File.Exists(fullPath))
+        string fileCheckPath = File.Exists(identityPath) ? identityPath : displayExePath;
+        if (!File.Exists(fileCheckPath))
         {
             return new WfpFilterInstallResult
             {
-                ExePath = fullPath,
+                ExePath = displayExePath,
+                IdentityPathUsed = identityPath,
+                IsShortPathFallback = shortFallback,
                 FileExists = false,
                 IsCalloutFilter = isCalloutFilter,
                 Error = "File not found.",
             };
         }
 
-        IntPtr appIdPtr = IntPtr.Zero;
-        uint appIdStatus = Native.FwpmGetAppIdFromFileName0(fullPath, out appIdPtr);
-        if (appIdStatus != 0 || appIdPtr == IntPtr.Zero)
+        if (!WfpAleAppIdBuilder.TryBuildNormalizedForFilePath(identityPath, out WfpOwnedAleAppIdBlob? ownedBlob, out string? buildError))
         {
             return new WfpFilterInstallResult
             {
-                ExePath = fullPath,
+                ExePath = displayExePath,
+                IdentityPathUsed = identityPath,
+                IsShortPathFallback = shortFallback,
                 FileExists = true,
                 AppIdResolved = false,
-                AppIdStatus = appIdStatus,
                 IsCalloutFilter = isCalloutFilter,
-                Error = "FwpmGetAppIdFromFileName0 failed.",
+                Error = buildError ?? "ALE_APP_ID normalization failed.",
             };
         }
 
-        try
+        using (ownedBlob)
         {
             var seed = new WfpFilterInstallResult
             {
-                ExePath = fullPath,
+                ExePath = displayExePath,
+                IdentityPathUsed = identityPath,
+                IsShortPathFallback = shortFallback,
                 FileExists = true,
                 AppIdResolved = true,
-                AppIdStatus = appIdStatus,
+                AppIdStatus = 0,
                 IsCalloutFilter = isCalloutFilter,
             };
-            return AddFilter(fullPath, layer, action, namePrefix, description, appIdPtr, isCalloutFilter, seed);
-        }
-        finally
-        {
-            Native.FwpmFreeMemory0(ref appIdPtr);
+            return AddFilter(displayExePath, layer, action, namePrefix, description, ownedBlob!.BlobPointer, isCalloutFilter, seed);
         }
     }
 
     private WfpFilterInstallResult AddFilter(
-        string fullPath,
+        string displayExePath,
         Guid layer,
         FWPM_ACTION0 action,
         string namePrefix,
@@ -285,7 +637,7 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
             filter.filterKey = filterKey;
             filter.displayData = new FWPM_DISPLAY_DATA0
             {
-                name = namePrefix + Path.GetFileName(fullPath),
+                name = namePrefix + Path.GetFileName(displayExePath),
                 description = description,
             };
             filter.providerKey = providerKeyPtr;
@@ -338,6 +690,175 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IDisposable
                 Marshal.FreeHGlobal(providerKeyPtr);
             }
         }
+    }
+}
+
+internal static class WfpRuntimeCaptureConditionLayout
+{
+    public static string SummaryLine
+    {
+        get
+        {
+            int condSize = Marshal.SizeOf<FWPM_FILTER_CONDITION0>();
+            int fieldKey = (int)Marshal.OffsetOf<FWPM_FILTER_CONDITION0>("fieldKey");
+            int matchType = (int)Marshal.OffsetOf<FWPM_FILTER_CONDITION0>("matchType");
+            int conditionValue = (int)Marshal.OffsetOf<FWPM_FILTER_CONDITION0>("conditionValue");
+            return "FWPM_FILTER_CONDITION0 sizeof=" + condSize
+                + " stride=" + condSize
+                + " offsets fieldKey=" + fieldKey
+                + " matchType=" + matchType
+                + " conditionValue=" + conditionValue;
+        }
+    }
+
+    public static IReadOnlyList<string> DescribeConditions(FWPM_FILTER_CONDITION0[] conditions)
+    {
+        var lines = new List<string>(conditions.Length);
+        for (int i = 0; i < conditions.Length; i++)
+        {
+            FWPM_FILTER_CONDITION0 c = conditions[i];
+            lines.Add(
+                "index=" + i
+                + " fieldKey=" + c.fieldKey
+                + " matchType=" + (uint)c.matchType
+                + " conditionValue.type=" + (uint)c.conditionValue.type);
+        }
+
+        return lines;
+    }
+}
+
+public readonly record struct WfpRuntimeCaptureFilterSetup(
+    Guid LayerKey,
+    Guid SubLayerKey,
+    Guid CalloutKey,
+    ulong RawContext,
+    uint ActionType,
+    string WeightDescription);
+
+public readonly record struct WfpRuntimeCaptureFilterResult(
+    uint FilterAddStatus,
+    ulong FilterId,
+    Guid FilterKey,
+    string? Error)
+{
+    public bool Success => FilterAddStatus == 0 && FilterId != 0 && string.IsNullOrEmpty(Error);
+}
+
+public interface IWfpRuntimeCaptureFilterInstaller
+{
+    bool SessionOpen { get; }
+
+    bool TryAddRuntimeAppIdCaptureFilter(out WfpRuntimeCaptureFilterResult result);
+
+    void RemoveRuntimeAppIdCaptureFilter(Guid filterKey);
+}
+
+public static class WfpRuntimeCaptureFilterPolicy
+{
+    public static readonly IReadOnlyList<string> ForbiddenUserModeOperations =
+    [
+        "FwpmEngineOpen0",
+        "FwpmEngineClose0",
+        "FwpmProviderAdd0",
+        "FwpmSubLayerAdd0",
+        "FwpmCalloutAdd0",
+    ];
+
+    public const bool RequiresProductionWfpSession = true;
+}
+
+public sealed class WfpRuntimeAppIdCapture : IDisposable
+{
+    public const ushort DiagnosticRemotePort = 39547;
+    public const string DiagnosticRemoteHost = "198.51.100.1";
+    public const ulong FilterRawContext = 0x535652444931UL;
+
+    private readonly IWfpRuntimeCaptureFilterInstaller _installer;
+    private Guid _filterKey;
+    private bool _installed;
+    private WfpRuntimeCaptureFilterResult _installResult;
+
+    public WfpRuntimeAppIdCapture(IWfpRuntimeCaptureFilterInstaller installer)
+    {
+        _installer = installer;
+    }
+
+    public bool ReusedProductionWfpSession => _installed;
+
+    public uint FilterAddStatus => _installResult.FilterAddStatus;
+
+    public ulong DiagnosticFilterId => _installResult.FilterId;
+
+    /// <summary>FWPM_CONDITION_IP_REMOTE_ADDRESS value (network-order uint32).</summary>
+    public static uint DiagnosticRemoteAddressUInt32 =>
+        WfpIpv4AddressEncoding.ToWfpIpv4AddressUInt32(DiagnosticRemoteHost);
+
+    public static byte[] DiagnosticRemoteAddressBytes =>
+        IPAddress.Parse(DiagnosticRemoteHost).GetAddressBytes();
+
+    /// <summary>Legacy incorrect encoding (host little-endian); A/B/C regression only.</summary>
+    public static uint DiagnosticRemoteAddressUInt32HostLittleEndian =>
+        BitConverter.ToUInt32(DiagnosticRemoteAddressBytes, 0);
+
+    public static uint DiagnosticRemoteAddressUInt32NetworkOrder =>
+        WfpIpv4AddressEncoding.ToWfpIpv4AddressUInt32(DiagnosticRemoteHost);
+
+    public static string FormatRemoteAddressEncodingReport()
+    {
+        byte[] b = DiagnosticRemoteAddressBytes;
+        string hexBytes = string.Join(" ", b.Select(x => x.ToString("X2")));
+        return "diagnosticRemoteAddress=" + DiagnosticRemoteHost
+            + " | diagnosticRemoteAddressUInt32=0x" + DiagnosticRemoteAddressUInt32.ToString("X8")
+            + " | addressEncoding=network-order"
+            + " | rawBytes=" + hexBytes
+            + " | hostLE(wrongForWfp)=0x" + DiagnosticRemoteAddressUInt32HostLittleEndian.ToString("X8")
+            + " | helper=WfpIpv4AddressEncoding.ToWfpIpv4AddressUInt32";
+    }
+
+    public bool TryInstall(out string error)
+    {
+        error = "";
+        if (_installed)
+        {
+            return true;
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            error = "Windows only.";
+            return false;
+        }
+
+        if (!_installer.SessionOpen)
+        {
+            error = "Production WFP session is not open.";
+            return false;
+        }
+
+        if (!_installer.TryAddRuntimeAppIdCaptureFilter(out WfpRuntimeCaptureFilterResult result))
+        {
+            _installResult = result;
+            error = result.Error ?? "FwpmFilterAdd0 failed: 0x" + result.FilterAddStatus.ToString("X8");
+            return false;
+        }
+
+        _installResult = result;
+        _filterKey = result.FilterKey;
+        _installed = true;
+        return true;
+    }
+
+    public void Dispose()
+    {
+        if (_installed && _filterKey != Guid.Empty)
+        {
+            _installer.RemoveRuntimeAppIdCaptureFilter(_filterKey);
+        }
+
+        _installed = false;
+        _filterKey = Guid.Empty;
+        _installResult = default;
     }
 }
 

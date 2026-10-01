@@ -1,12 +1,31 @@
 #Requires -RunAsAdministrator
+param(
+    [switch]$VerboseOutput
+)
+
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_common.ps1")
 
 $root = Get-SvrRepoRoot
-$publishDir = Get-SvrPublishDirectory -Root $root
-$appExe = Join-Path $publishDir "SelectiveVpnRouter.App.exe"
+$quiet = -not $VerboseOutput
+Initialize-SvrUpdateSession -Quiet:$quiet -RepoRoot $root
+
+$solution = Join-Path $root "SelectiveVpnRouter.sln"
+$liveDir = Get-SvrPublishDirectory -Root $root
+$stagingDir = Get-SvrStagingDirectory -Root $root
+$prevDir = Get-SvrPublishPrevDirectory -Root $root
+$stagingParent = Split-Path $stagingDir -Parent
+$prevParent = Split-Path $prevDir -Parent
+$appExe = Join-Path $liveDir "SelectiveVpnRouter.App.exe"
+$serviceExe = Join-Path $liveDir "SelectiveVpnRouter.Service.exe"
+$probeExe = Join-Path $liveDir "SelectiveVpnRouter.Probe.exe"
 $serviceName = "SelectiveVpnRouter"
 $serviceTimeout = New-TimeSpan -Seconds 30
+$publishScript = Join-Path $PSScriptRoot "publish-desktop.ps1"
+$script:deployBackedUp = $false
+$script:deployLiveUpdated = $false
+$script:deployRetiredPath = $null
+$script:serviceExisted = $false
 
 function Wait-ServiceStatus {
     param(
@@ -17,46 +36,180 @@ function Wait-ServiceStatus {
     $svc.WaitForStatus($Status, $serviceTimeout)
 }
 
-# 1. Stop all GUI instances before touching publish directory.
-Stop-AllSvrGuiProcesses -TimeoutSeconds 10
+function Invoke-SvrDeploySwap {
+    Write-SvrUpdateLogLine "=== STEP deploy ==="
+    $global:SvrCurrentStage = "deploy"
+    if (-not $global:SvrStageOutputs.ContainsKey("deploy")) {
+        $global:SvrStageOutputs["deploy"] = ""
+    }
 
-# 2. Stop Windows Service and wait until Stopped (force service process if needed).
-$serviceExisted = Stop-SvrServiceForPublish -ServiceName $serviceName -TimeoutSeconds 15
+    try {
+        Stop-AllSvrGuiProcesses -TimeoutSeconds 10
+        $script:serviceExisted = Stop-SvrServiceForPublish -ServiceName $serviceName -TimeoutSeconds 15
+        Stop-SvrPublishOrphanProcesses -PublishDir $liveDir -TimeoutSeconds 10
+        Wait-SvrPublishDirectoryUnlocked -PublishDir $liveDir -TimeoutSeconds 20
+        Remove-SvrRetiredPublishDirectories -ParentDir (Split-Path $liveDir -Parent)
+        Write-SvrUpdateLogLine "publish-lock-check: live publish directory unlocked"
 
-# 3. Ensure no executable from publish directory is still running.
-Ensure-SvrPublishDirectoryUnlocked -PublishDir $publishDir -ProcessExitTimeoutSeconds 10
-Write-SvrResult -Outcome INFO -Name "publish-lock-check" -Message "no processes using publish directory"
+        if (-not (Test-Path -LiteralPath $liveDir)) {
+            if (Test-Path -LiteralPath (Join-Path $prevDir "SelectiveVpnRouter.Service.exe")) {
+                Write-SvrUpdateLogLine "live publish missing; restoring from previous backup"
+                Invoke-SvrRestorePublishFromBackup -BackupDir $prevDir -LiveDir $liveDir
+            }
+            else {
+                throw "live publish directory not found: $liveDir"
+            }
+        }
+        elseif (-not (Test-Path -LiteralPath $serviceExe)) {
+            if (Test-Path -LiteralPath (Join-Path $prevDir "SelectiveVpnRouter.Service.exe")) {
+                Write-SvrUpdateLogLine "live publish incomplete; restoring from previous backup"
+                Invoke-SvrRestorePublishFromBackup -BackupDir $prevDir -LiveDir $liveDir
+            }
+            else {
+                throw "live publish incomplete (missing SelectiveVpnRouter.Service.exe) and no backup available"
+            }
+        }
 
-# 4. Remove old publish folder with retry (handles lingering DLL handles).
-Remove-DirectoryWithRetry -Path $publishDir -PublishDir $publishDir
+        Write-SvrUpdateLogLine "Removing previous backup publish directory"
+        Remove-DirectoryWithRetry -Path $prevDir -PublishDir $liveDir
 
-# 5. Publish managed binaries.
-& (Join-Path $PSScriptRoot "publish-desktop.ps1")
-if ($LASTEXITCODE -ne 0) {
-    Write-SvrResult -Outcome FAIL -Name "update-desktop" -Message "publish-desktop.ps1 failed with exit code $LASTEXITCODE"
-    exit $LASTEXITCODE
-}
+        Write-SvrUpdateLogLine "Backing up live publish directory to previous"
+        Invoke-SvrRobocopyMirror -Source $liveDir -Destination $prevDir
+        $script:deployBackedUp = $true
 
-Write-SvrResult -Outcome PASS -Name "publish" -Message $publishDir
+        Write-SvrUpdateLogLine "Promoting staging publish directory to live"
+        $script:deployRetiredPath = Invoke-SvrPromotePublishDirectory -Source $stagingDir -Destination $liveDir -RecreateSource
+        $script:deployLiveUpdated = $true
 
-# 6. Install or reconfigure service, then start.
-if (-not $serviceExisted) {
-    & (Join-Path $PSScriptRoot "install-service.ps1") -BinPath (Join-Path $publishDir "SelectiveVpnRouter.Service.exe")
-    if ($LASTEXITCODE -ne 0) {
-        Write-SvrResult -Outcome FAIL -Name "update-desktop" -Message "install-service.ps1 failed with exit code $LASTEXITCODE"
-        exit $LASTEXITCODE
+        Start-SvrPublishedService -ServiceName $serviceName -ServiceExe $serviceExe
+        Remove-SvrRetiredPublishDirectories -ParentDir (Split-Path $liveDir -Parent)
+    }
+    catch {
+        Add-SvrStageOutput $_.Exception.Message
+        throw
+    }
+    finally {
+        $global:SvrCurrentStage = $null
     }
 }
-else {
-    Set-Service -Name $serviceName -StartupType Automatic
+
+function Invoke-SvrDeployRollback {
+    Write-SvrUpdateLogLine "Attempting rollback to previous publish"
+    try {
+        Stop-AllSvrGuiProcesses -TimeoutSeconds 10 | Out-Null
+        Stop-SvrServiceForPublish -ServiceName $serviceName -TimeoutSeconds 15 | Out-Null
+
+        if ((Test-Path -LiteralPath $prevDir) -and ($script:deployBackedUp -or $script:deployLiveUpdated)) {
+            Write-SvrUpdateLogLine "Restoring previous publish from backup"
+            Invoke-SvrRestorePublishFromBackup -BackupDir $prevDir -LiveDir $liveDir
+        }
+
+        if ((Test-Path -LiteralPath $liveDir) -and (Test-Path -LiteralPath (Join-Path $liveDir "SelectiveVpnRouter.Service.exe"))) {
+            $rollbackService = Join-Path $liveDir "SelectiveVpnRouter.Service.exe"
+            Start-SvrPublishedService -ServiceName $serviceName -ServiceExe $rollbackService
+            Add-SvrStepResult -Name "rollback" -Outcome PASS -Label "rollback"
+            Write-SvrUpdateLogLine "Rollback completed"
+            return $true
+        }
+    }
+    catch {
+        Add-SvrStageOutput $_.Exception.Message
+        Add-SvrStepResult -Name "rollback" -Outcome FAIL -Label "rollback"
+        Write-SvrUpdateLogLine "Rollback failed: $($_.Exception.Message)"
+    }
+    return $false
 }
 
-Start-Service -Name $serviceName
-Wait-ServiceStatus -Name $serviceName -Status Running
+try {
+    Invoke-SvrStep -Name "build" -PassLabel "build" -Action {
+        Invoke-SvrDotNet -ArgumentList @("restore", $solution) | Out-Null
+        Invoke-SvrDotNet -ArgumentList @("build", $solution, "-c", "Release", "--no-restore") | Out-Null
+    }
 
-$svc = Get-Service -Name $serviceName
-$startMode = (Get-CimInstance Win32_Service -Filter "Name='$serviceName'").StartMode
-$startTypeLabel = if ($startMode -eq "Auto") { "Auto" } else { $startMode }
-Write-SvrResult -Outcome PASS -Name "service" -Message "Status=$($svc.Status); StartType=$startTypeLabel"
-Write-SvrResult -Outcome INFO -Name "GUI" -Message $appExe
-Write-SvrResult -Outcome INFO -Name "update-desktop" -Message "completed. GUI was not started automatically."
+    $testResult = Invoke-SvrStep -Name "tests" -PassLabel "tests" -Action {
+        Invoke-SvrDotNet -ArgumentList @("test", $solution, "-c", "Release", "--no-build")
+    }
+    $testPassedCount = Get-SvrDotNetTestPassedCount -Output $testResult.Output
+    if ($testPassedCount) {
+        $global:SvrStepResults[-1].Detail = "$testPassedCount"
+    }
+
+    if (Test-Path -LiteralPath $stagingDir) {
+        Write-SvrUpdateLogLine "Clearing existing staging directory"
+        Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction Stop
+    }
+    New-Item -ItemType Directory -Force -Path $stagingParent | Out-Null
+
+    Invoke-SvrStep -Name "publish" -PassLabel "publish" -Action {
+        & $publishScript -Quiet -OutputDirectory $stagingDir
+        if ($LASTEXITCODE -ne 0) { throw "publish-desktop.ps1 failed with exit code $LASTEXITCODE" }
+        Test-SvrStagingPublish -StagingDir $stagingDir
+    }
+
+    $deploySw = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        Invoke-SvrDeploySwap
+        $deploySw.Stop()
+        Write-SvrUpdateLogLine ("deploy completed in {0:N1}s" -f $deploySw.Elapsed.TotalSeconds)
+    }
+    catch {
+        $deploySw.Stop()
+        Add-SvrStageOutput $_.Exception.Message
+        Add-SvrStepResult -Name "deploy" -Outcome FAIL -Label "deploy" -Duration $deploySw.Elapsed
+        if ($script:deployLiveUpdated -or $script:deployBackedUp) {
+            Invoke-SvrDeployRollback | Out-Null
+        }
+        Write-SvrCompactConsole -FailedStep "deploy" -FailedMessage $_.Exception.Message
+        exit 1
+    }
+
+    Write-SvrUpdateLogLine "=== STEP service-ready ==="
+    $global:SvrCurrentStage = "service-ready"
+    if (-not $global:SvrStageOutputs.ContainsKey("service-ready")) {
+        $global:SvrStageOutputs["service-ready"] = ""
+    }
+    try {
+        Wait-SvrIpcReady -ServiceName $serviceName -TimeoutSeconds 15 -PollIntervalMs 250
+    }
+    catch {
+        Add-SvrStageOutput $_.Exception.Message
+        Add-SvrStepResult -Name "service-ready" -Outcome FAIL -Label "service-ready"
+        Write-SvrCompactConsole -FailedStep "service-ready" -FailedMessage $_.Exception.Message
+        exit 1
+    }
+    finally {
+        $global:SvrCurrentStage = $null
+    }
+
+    $svc = Get-Service -Name $serviceName -ErrorAction Stop
+    $serviceDetail = if ($svc.Status -eq "Running") { "Running" } else { $svc.Status.ToString() }
+    Add-SvrStepResult -Name "service" -Outcome PASS -Label "service" -Detail $serviceDetail
+
+    $iconIco = Join-Path $root "assets\branding\vpn-route-icon.ico"
+    if (-not (Test-Path -LiteralPath $iconIco)) {
+        $iconIco = Join-Path $root "src\SelectiveVpnRouter.App\vpn-route-icon.ico"
+    }
+    if (Test-Path -LiteralPath $iconIco) {
+        Copy-Item -LiteralPath $iconIco -Destination (Join-Path $liveDir "vpn-route-icon.ico") -Force
+    }
+
+    Update-VpnRouteDesktopShortcuts -AppExe $appExe -ProductName "VPN Route" -IconPath $iconIco
+
+    Invoke-SvrStep -Name "smoke" -PassLabel "smoke" -Action {
+        Invoke-SvrCaptureScript -FilePath (Join-Path $PSScriptRoot "smoke-network-catalog.ps1") `
+            -ArgumentList @("-ProbePath", $probeExe, "-Quiet") | Out-Null
+
+        Write-SvrUpdateLogLine "=== STEP routing-fast ==="
+        Invoke-SvrCaptureScript -FilePath (Join-Path $PSScriptRoot "test-routing-fast.ps1") `
+            -ArgumentList @("-Quiet") -AllowedExitCodes @(0, 2) | Out-Null
+    }
+
+    Write-SvrUpdateSummary -Success
+    exit 0
+}
+catch {
+    if ($global:SvrStepResults.Count -eq 0 -or $global:SvrStepResults[-1].Outcome -ne "FAIL") {
+        Write-SvrCompactConsole -FailedStep "update" -FailedMessage $_.Exception.Message
+    }
+    exit 1
+}

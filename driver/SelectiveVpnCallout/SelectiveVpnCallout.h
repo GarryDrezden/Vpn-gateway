@@ -21,6 +21,11 @@ DEFINE_GUID(SVR_PROVIDER_GUID,
 
 #define SVR_IOCTL_SET_TARGET CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #define SVR_IOCTL_GET_STATUS CTL_CODE(FILE_DEVICE_UNKNOWN, 0x802, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define SVR_IOCTL_RESET_RUNTIME_CAPTURE CTL_CODE(FILE_DEVICE_UNKNOWN, 0x803, METHOD_BUFFERED, FILE_ANY_ACCESS)
+
+#define SVR_STATUS_VERSION 2
+#define SVR_FILTER_RAW_CONTEXT_RUNTIME_CAPTURE 0x535652444931ULL /* 'SVRDI1' */
+#define SVR_RUNTIME_APP_ID_TEXT_CHARS 512
 
 #define SVR_POOL_TAG 'rvS'
 
@@ -41,6 +46,32 @@ typedef struct _SVR_STATUS {
     UINT32 RedirectApplySuccess;
     UINT32 RedirectApplyFailures;
     INT32 LastRedirectApplyStatus;
+    UINT32 ClassifyEntries;
+    UINT32 ExitNoActionWrite;
+    UINT32 ExitDisabled;
+    UINT32 ExitProxyPidZero;
+    UINT32 ExitProxyPortZero;
+    UINT32 ExitRedirectHandleNull;
+    UINT32 ExitClassifyContextNull;
+    UINT32 ExitPidZero;
+    UINT32 ExitProxyPid;
+    UINT32 AcquireClassifyHandleFailures;
+    UINT32 AcquireWritableLayerDataFailures;
+    UINT32 AlreadyLoopbackProxy;
+    UINT32 AllocationFailures;
+    UINT64 LastClassifyPid;
+    UINT64 LastFilterId;
+    UINT32 LastRights;
+    UINT32 StatusPad; /* SVR_STATUS_VERSION when extended status is supported */
+    UINT32 RuntimeCaptureCount;
+    UINT32 RuntimeAppIdPresent;
+    UINT32 RuntimeAppIdByteLength;
+    UINT32 RuntimeAppIdValueType;
+    UINT64 RuntimeProcessId;
+    UINT64 RuntimeFilterId;
+    UINT32 RuntimeRights;
+    UINT32 RuntimeCapturePad;
+    WCHAR RuntimeAppIdText[SVR_RUNTIME_APP_ID_TEXT_CHARS];
 } SVR_STATUS;
 
 typedef struct _SVR_REDIRECT_CONTEXT {
@@ -60,6 +91,33 @@ extern volatile LONG gRedirectAttempts;
 extern volatile LONG gRedirectApplySuccess;
 extern volatile LONG gRedirectApplyFailures;
 extern volatile LONG gLastRedirectApplyStatus;
+extern volatile LONG gClassifyEntries;
+extern volatile LONG gExitNoActionWrite;
+extern volatile LONG gExitDisabled;
+extern volatile LONG gExitProxyPidZero;
+extern volatile LONG gExitProxyPortZero;
+extern volatile LONG gExitRedirectHandleNull;
+extern volatile LONG gExitClassifyContextNull;
+extern volatile LONG gExitPidZero;
+extern volatile LONG gExitProxyPid;
+extern volatile LONG gAcquireClassifyHandleFailures;
+extern volatile LONG gAcquireWritableLayerDataFailures;
+extern volatile LONG gAlreadyLoopbackProxy;
+extern volatile LONG gAllocationFailures;
+extern volatile UINT64 gLastClassifyPid;
+extern volatile UINT64 gLastFilterId;
+extern volatile UINT32 gLastRights;
+extern volatile LONG gRuntimeCaptureCount;
+extern volatile ULONG gRuntimeAppIdPresent;
+extern volatile ULONG gRuntimeAppIdByteLength;
+extern volatile ULONG gRuntimeAppIdValueType;
+extern volatile UINT64 gRuntimeCapturePid;
+extern volatile UINT64 gRuntimeCaptureFilterId;
+extern volatile ULONG gRuntimeCaptureRights;
+extern WCHAR gRuntimeAppIdText[SVR_RUNTIME_APP_ID_TEXT_CHARS];
+extern KSPIN_LOCK gRuntimeCaptureLock;
+
+VOID SvrResetRuntimeCapture(VOID);
 
 DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_UNLOAD SvrEvtDriverUnload;

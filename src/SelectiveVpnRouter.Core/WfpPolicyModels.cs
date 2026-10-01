@@ -2,7 +2,13 @@ namespace SelectiveVpnRouter.Core;
 
 public sealed record WfpFilterInstallResult
 {
+    /// <summary>Display / rule path (long Unicode path shown to the user).</summary>
     public string ExePath { get; init; } = "";
+
+    /// <summary>Path passed to FwpmGetAppIdFromFileName0 for this filter.</summary>
+    public string IdentityPathUsed { get; init; } = "";
+
+    public bool IsShortPathFallback { get; init; }
     public bool FileExists { get; init; }
     public bool AppIdResolved { get; init; }
     public uint AppIdStatus { get; init; }

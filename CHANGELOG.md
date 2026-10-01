@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.2.0 — Selective VPN Router MVP foundation
+## Milestone — Unicode ALE_APP_ID routing (`unicode-appid-routing-pass-v1`)
+
+- **Root cause:** runtime ALE_APP_ID is byte-exact UTF-16LE; FwpmGetAppIdFromFileName0 can return filesystem casing that differs (e.g. Cyrillic Т vs т).
+- **Production fix:** WfpAleAppIdBuilder — Fwpm canonical string → ToLowerInvariant() → owned UTF-16LE+NUL blob for FWPM_CONDITION_ALE_APP_ID (WfpSession.InstallAppFilter).
+- **Removed** dual long/short APP_ID filter strategy from default identity paths (8.3 workaround not used in production).
+- **Diagnostics:** wfp-runtime-appid-normalization-matrix, wfp-telegram-appid-acceptance; updated wfp-runtime-appid-case interpretation; blob diagnostic case E uses production builder.
+- **Offline runner:** scripts/run-wfp-appid-regression.ps1 (matrix, blob, case, unicode probe, Telegram acceptance).
+- **Tests:** WfpAleAppIdBuilderTests (Cyrillic/ASCII bytes, dispose, file pipeline).
+
+## 0.2.0 — VPN Route MVP foundation
 
 - Kept `SelectiveVpn.V0` transport PoC.
 - Core: application/domain/CIDR rules, DIRECT precedence, no parent inheritance, route ownership, DNS cache, config + crash state, OpenVPN parsers.

@@ -11,8 +11,48 @@ volatile LONG gRedirectAttempts = 0;
 volatile LONG gRedirectApplySuccess = 0;
 volatile LONG gRedirectApplyFailures = 0;
 volatile LONG gLastRedirectApplyStatus = 0;
+volatile LONG gClassifyEntries = 0;
+volatile LONG gExitNoActionWrite = 0;
+volatile LONG gExitDisabled = 0;
+volatile LONG gExitProxyPidZero = 0;
+volatile LONG gExitProxyPortZero = 0;
+volatile LONG gExitRedirectHandleNull = 0;
+volatile LONG gExitClassifyContextNull = 0;
+volatile LONG gExitPidZero = 0;
+volatile LONG gExitProxyPid = 0;
+volatile LONG gAcquireClassifyHandleFailures = 0;
+volatile LONG gAcquireWritableLayerDataFailures = 0;
+volatile LONG gAlreadyLoopbackProxy = 0;
+volatile LONG gAllocationFailures = 0;
+volatile UINT64 gLastClassifyPid = 0;
+volatile UINT64 gLastFilterId = 0;
+volatile UINT32 gLastRights = 0;
+volatile LONG gRuntimeCaptureCount = 0;
+volatile ULONG gRuntimeAppIdPresent = 0;
+volatile ULONG gRuntimeAppIdByteLength = 0;
+volatile ULONG gRuntimeAppIdValueType = 0;
+volatile UINT64 gRuntimeCapturePid = 0;
+volatile UINT64 gRuntimeCaptureFilterId = 0;
+volatile ULONG gRuntimeCaptureRights = 0;
+WCHAR gRuntimeAppIdText[SVR_RUNTIME_APP_ID_TEXT_CHARS];
+KSPIN_LOCK gRuntimeCaptureLock;
 
 static WDFDEVICE gDevice = NULL;
+
+VOID SvrResetRuntimeCapture(VOID)
+{
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&gRuntimeCaptureLock, &oldIrql);
+    gRuntimeCaptureCount = 0;
+    gRuntimeAppIdPresent = 0;
+    gRuntimeAppIdByteLength = 0;
+    gRuntimeAppIdValueType = 0;
+    gRuntimeCapturePid = 0;
+    gRuntimeCaptureFilterId = 0;
+    gRuntimeCaptureRights = 0;
+    RtlZeroMemory(gRuntimeAppIdText, sizeof(gRuntimeAppIdText));
+    KeReleaseSpinLock(&gRuntimeCaptureLock, oldIrql);
+}
 
 VOID SvrFailOpen(VOID)
 {
@@ -71,6 +111,10 @@ VOID SvrEvtIoDeviceControl(
             gEnabled = (target->Enabled != 0) && (target->ProxyPid != 0) && (target->ProxyPort != 0);
         }
     }
+    else if (IoControlCode == SVR_IOCTL_RESET_RUNTIME_CAPTURE)
+    {
+        SvrResetRuntimeCapture();
+    }
     else if (IoControlCode == SVR_IOCTL_GET_STATUS)
     {
         SVR_STATUS *out = NULL;
@@ -85,6 +129,9 @@ VOID SvrEvtIoDeviceControl(
             status = WdfRequestRetrieveOutputBuffer(Request, sizeof(SVR_STATUS), (PVOID *)&out, &len);
             if (NT_SUCCESS(status) && out != NULL)
             {
+                KIRQL oldIrql;
+                KeAcquireSpinLock(&gRuntimeCaptureLock, &oldIrql);
+
                 out->ProxyPid = gProxyPid;
                 out->ProxyPort = gProxyPort;
                 out->Enabled = gEnabled ? 1 : 0;
@@ -95,6 +142,37 @@ VOID SvrEvtIoDeviceControl(
                 out->RedirectApplySuccess = (UINT32)gRedirectApplySuccess;
                 out->RedirectApplyFailures = (UINT32)gRedirectApplyFailures;
                 out->LastRedirectApplyStatus = (INT32)gLastRedirectApplyStatus;
+                out->ClassifyEntries = (UINT32)gClassifyEntries;
+                out->ExitNoActionWrite = (UINT32)gExitNoActionWrite;
+                out->ExitDisabled = (UINT32)gExitDisabled;
+                out->ExitProxyPidZero = (UINT32)gExitProxyPidZero;
+                out->ExitProxyPortZero = (UINT32)gExitProxyPortZero;
+                out->ExitRedirectHandleNull = (UINT32)gExitRedirectHandleNull;
+                out->ExitClassifyContextNull = (UINT32)gExitClassifyContextNull;
+                out->ExitPidZero = (UINT32)gExitPidZero;
+                out->ExitProxyPid = (UINT32)gExitProxyPid;
+                out->AcquireClassifyHandleFailures = (UINT32)gAcquireClassifyHandleFailures;
+                out->AcquireWritableLayerDataFailures = (UINT32)gAcquireWritableLayerDataFailures;
+                out->AlreadyLoopbackProxy = (UINT32)gAlreadyLoopbackProxy;
+                out->AllocationFailures = (UINT32)gAllocationFailures;
+                out->LastClassifyPid = gLastClassifyPid;
+                out->LastFilterId = gLastFilterId;
+                out->LastRights = gLastRights;
+                out->StatusPad = SVR_STATUS_VERSION;
+                out->RuntimeCaptureCount = (UINT32)gRuntimeCaptureCount;
+                out->RuntimeAppIdPresent = gRuntimeAppIdPresent;
+                out->RuntimeAppIdByteLength = gRuntimeAppIdByteLength;
+                out->RuntimeAppIdValueType = gRuntimeAppIdValueType;
+                out->RuntimeProcessId = gRuntimeCapturePid;
+                out->RuntimeFilterId = gRuntimeCaptureFilterId;
+                out->RuntimeRights = gRuntimeCaptureRights;
+                out->RuntimeCapturePad = 0;
+                RtlCopyMemory(
+                    out->RuntimeAppIdText,
+                    gRuntimeAppIdText,
+                    sizeof(out->RuntimeAppIdText));
+
+                KeReleaseSpinLock(&gRuntimeCaptureLock, oldIrql);
                 written = sizeof(SVR_STATUS);
             }
         }
@@ -120,6 +198,9 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT DriverObject, _In_ PUNICODE_STRING Regi
     {
         return status;
     }
+
+    KeInitializeSpinLock(&gRuntimeCaptureLock);
+    SvrResetRuntimeCapture();
 
     PWDFDEVICE_INIT init = WdfControlDeviceInitAllocate(driver, &SDDL_DEVOBJ_SYS_ALL_ADM_ALL);
     if (init == NULL)

@@ -1,6 +1,6 @@
 # Architecture
 
-Selective VPN Router splits **unelevated UI** from an **elevated backend**.
+VPN Route splits **unelevated UI** from an **elevated backend**.
 
 ```
 SelectiveVpnRouter.App (WPF, tray)

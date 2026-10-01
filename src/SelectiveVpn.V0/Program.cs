@@ -1028,7 +1028,7 @@ internal static class Program
 
         public static void PrintHelp()
         {
-            Console.WriteLine("Selective VPN Router V0.1 — controlled /32 route probe");
+            Console.WriteLine("VPN Route V0.1 — controlled /32 route probe");
             Console.WriteLine();
             Console.WriteLine("Usage:");
             Console.WriteLine("  dotnet run --project .\\src\\SelectiveVpn.V0\\SelectiveVpn.V0.csproj -- --openvpn <openvpn.exe> --profile <file.ovpn> [--timeout 30]");

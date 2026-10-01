@@ -3,6 +3,9 @@ namespace SelectiveVpnRouter.Core;
 public sealed record TempAppVpnRequest
 {
     public required string ExePath { get; init; }
+
+    /// <summary>Diagnostic WFP APP_ID path mode (Default = long + optional 8.3 fallback).</summary>
+    public WfpAppIdentityPathMode IdentityPathMode { get; init; } = WfpAppIdentityPathMode.Default;
 }
 
 public sealed record RealAppFlowObservation
@@ -41,6 +44,9 @@ public sealed record TempAppVpnStatus
     public bool AppIdResolved { get; init; }
     public bool FilterInstalled { get; init; }
     public ulong FilterId { get; init; }
+    public ulong ShortPathFilterId { get; init; }
+    public string? WfpFiltersSummary { get; init; }
+    public WfpAppIdentityPathMode IdentityPathMode { get; init; } = WfpAppIdentityPathMode.Default;
     public string? Error { get; init; }
     public string ObservationState { get; init; } = "NONE";
     public DateTimeOffset QueriedAt { get; init; } = DateTimeOffset.UtcNow;

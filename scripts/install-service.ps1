@@ -22,9 +22,9 @@ Initialize-SvrProgramData
 
 sc.exe stop SelectiveVpnRouter 2>$null | Out-Null
 sc.exe delete SelectiveVpnRouter 2>$null | Out-Null
-sc.exe create SelectiveVpnRouter binPath= $quotedBinPath start= auto DisplayName= "Selective VPN Router"
+sc.exe create SelectiveVpnRouter binPath= $quotedBinPath start= auto DisplayName= "VPN Route"
 if ($LASTEXITCODE -ne 0) { throw "sc.exe create failed with exit code $LASTEXITCODE" }
-sc.exe description SelectiveVpnRouter "Elevated backend for Selective VPN Router (OpenVPN, owned routes, WFP, proxy)."
+sc.exe description SelectiveVpnRouter "Elevated backend for VPN Route (OpenVPN, owned routes, WFP, proxy)."
 sc.exe start SelectiveVpnRouter
 if ($LASTEXITCODE -ne 0) { throw "sc.exe start failed with exit code $LASTEXITCODE" }
 

@@ -7,12 +7,17 @@ namespace SelectiveVpnRouter.Service;
 public sealed partial class RouterEngine
 {
     private string? _tempRealAppExePath;
+    private WfpAppIdentityPathMode _tempRealAppWfpMode = WfpAppIdentityPathMode.Default;
+    private string? _tempRealAppWfpIdentityOverride;
 
     public TempAppVpnStatus GetTempAppVpnStatus()
     {
         string? exe = _tempRealAppExePath;
         WfpPolicyDiagnostics policy = WfpPolicy;
-        WfpFilterInstallResult? filter = exe is null ? null : WfpPolicyHealth.FindCalloutFilter(policy, exe);
+        IReadOnlyList<WfpFilterInstallResult> calloutFilters = exe is null ? [] : WfpPolicyHealth.FindCalloutFilters(policy, exe);
+        WfpFilterInstallResult? filter = calloutFilters.FirstOrDefault(f => !f.IsShortPathFallback)
+            ?? calloutFilters.FirstOrDefault();
+        WfpFilterInstallResult? shortFilter = calloutFilters.FirstOrDefault(f => f.IsShortPathFallback);
         IReadOnlyList<FlowEvent> flows = Proxy?.Flows ?? [];
         bool ipv6Block = Config.Vpn.Ipv6Policy is Ipv6Policy.BlockForVpnRoutedApps
             || (Config.Vpn.Ipv6Policy is Ipv6Policy.Auto && _vpnAdapter?.Ipv6.Any(a => !a.StartsWith("fe80", StringComparison.OrdinalIgnoreCase)) != true);
@@ -50,9 +55,12 @@ public sealed partial class RouterEngine
             ExePath = exe,
             FileExists = exe is not null && File.Exists(exe),
             AppIdResolved = filter?.AppIdResolved == true,
-            FilterInstalled = filter?.FilterInstalled == true,
+            FilterInstalled = calloutFilters.Any(f => f.FilterInstalled),
             FilterId = filter?.FilterId ?? 0,
-            Error = filter?.Error,
+            ShortPathFilterId = shortFilter?.FilterId ?? 0,
+            WfpFiltersSummary = calloutFilters.Count == 0 ? null : WfpPolicyHealth.SummarizeCalloutFilters(calloutFilters),
+            IdentityPathMode = _tempRealAppWfpMode,
+            Error = filter?.Error ?? calloutFilters.FirstOrDefault(f => f.Error is not null)?.Error,
             QueriedAt = DateTimeOffset.UtcNow,
             SelectedFlow = selected,
             RecentFlows = recentDtos.Select(TempAppVpnFlowDtoToObservation).ToArray(),
@@ -64,22 +72,32 @@ public sealed partial class RouterEngine
         return status with { Summary = RealAppRoutingObservation.BuildSummary(status) };
     }
 
-    public async Task<TempAppVpnStatus> ApplyTempAppVpnRouteAsync(string exePath)
+    public async Task<TempAppVpnStatus> ApplyTempAppVpnRouteAsync(
+        string exePath,
+        WfpAppIdentityPathMode identityPathMode = WfpAppIdentityPathMode.Default)
     {
         if (string.IsNullOrWhiteSpace(exePath))
         {
             throw new ArgumentException("Executable path is required.", nameof(exePath));
         }
 
+        _tempRealAppWfpMode = identityPathMode;
+        _tempRealAppWfpIdentityOverride = identityPathMode == WfpAppIdentityPathMode.ShortPathOnly
+            ? exePath.Trim().Trim('"')
+            : null;
         _tempRealAppExePath = Path.GetFullPath(exePath);
         await RefreshPolicyAsync().ConfigureAwait(false);
-        Log("temp-app-vpn-enabled exe=" + _tempRealAppExePath);
+        Log("temp-app-vpn-enabled exe=" + _tempRealAppExePath
+            + " wfpMode=" + _tempRealAppWfpMode
+            + (_tempRealAppWfpIdentityOverride is null ? "" : " wfpIdentityOverride=" + _tempRealAppWfpIdentityOverride));
         return GetTempAppVpnStatus();
     }
 
     public async Task<TempAppVpnStatus> RemoveTempAppVpnRouteAsync()
     {
         _tempRealAppExePath = null;
+        _tempRealAppWfpMode = WfpAppIdentityPathMode.Default;
+        _tempRealAppWfpIdentityOverride = null;
         await RefreshPolicyAsync().ConfigureAwait(false);
         Log("temp-app-vpn-removed");
         return GetTempAppVpnStatus();
@@ -139,6 +157,8 @@ public sealed partial class RouterEngine
         }
 
         _tempRealAppExePath = null;
+        _tempRealAppWfpMode = WfpAppIdentityPathMode.Default;
+        _tempRealAppWfpIdentityOverride = null;
         Log("temp-app-vpn-cleared-on-disconnect");
     }
 }

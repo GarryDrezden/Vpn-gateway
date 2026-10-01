@@ -1,4 +1,4 @@
-# Selective VPN Router
+# VPN Route
 
 Windows 10/11 x64 app that keeps **normal Direct internet** as the system default, can coexist with a **corporate VPN**, and sends **only selected applications** (and optionally selected destinations) through a **personal OpenVPN** tunnel.
 
@@ -35,10 +35,27 @@ Real browser verified: `C:\Program Files (x86)\Google\Chrome\Application\chrome.
 
 Full chain: chrome.exe → ALE APP_ID / WFP → callout → transparent proxy → VPN-bound outbound → HTTPS → VPN egress.
 
+### Milestone 4 — `unicode-appid-routing-pass-v1`
+
+Unicode and non-ASCII executable paths: **PASS** (normalized ALE_APP_ID after Fwpm canonical string).
+
+- Normalization matrix: `counterExamples=0` (ASCII, Cyrillic, Latin umlaut, mixed paths)
+- Unicode Probe redirect end-to-end: Outcome PASS, VPN public IP (`91.184.250.53`)
+- Telegram (`Telegram Desktop\Telegram.exe` under a Unicode user profile): production filter + UI flows `Route=VPN`
+
+Technical note: [docs/unicode-ale-app-id.md](docs/unicode-ale-app-id.md)
+
+Offline regression (after VPN Connected):
+
+```powershell
+.\scripts\test-runtime-diagnostic-preflight.ps1
+.\scripts\run-wfp-appid-regression.ps1
+```
+
 ### Verified now (TCP IPv4)
 
-- Per-process connect-redirect for selected `.exe` processes
-- Probe isolation + real-app curl egress + real Chrome browser egress
+- Per-process connect-redirect for selected `.exe` processes (ASCII and Unicode paths)
+- Probe isolation + real-app curl egress + real Chrome browser egress + Telegram (Unicode path)
 - WFP ALE APP_ID, callout redirect, proxy, redirect context, VPN-bound outbound
 - Real-app flow history with target matching (background flows do not false-pass target)
 
@@ -49,6 +66,22 @@ Full chain: chrome.exe → ALE APP_ID / WFP → callout → transparent proxy �
 - Arbitrary DNS routing for all apps
 - Production installer / consumer packaging
 
+
+## Developer update command
+
+Primary dev workflow from repo root (elevated PowerShell):
+
+```powershell
+.\scripts\update-desktop.ps1
+```
+
+Runs **build -> tests -> publish -> service restart -> runtime smoke** with a short console summary. Full output is saved automatically to `artifacts/logs/update-desktop-*.log`.
+
+Verbose console output:
+
+```powershell
+.\scripts\update-desktop.ps1 -VerboseOutput
+```
 ## What this is
 
 | Piece | Role |

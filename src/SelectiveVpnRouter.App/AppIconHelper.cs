@@ -9,6 +9,8 @@ namespace SelectiveVpnRouter.App;
 
 internal static class AppIconHelper
 {
+    public const string IconFileName = "vpn-route-icon.ico";
+
     private static DrawingIcon? _drawingIcon;
     private static ImageSource? _wpfIcon;
 
@@ -58,7 +60,7 @@ internal static class AppIconHelper
             }
         }
 
-        string icoPath = Path.Combine(AppContext.BaseDirectory, "SelectiveVpnRouter.ico");
+        string icoPath = Path.Combine(AppContext.BaseDirectory, IconFileName);
         if (File.Exists(icoPath))
         {
             return new DrawingIcon(icoPath);
@@ -82,7 +84,7 @@ internal static class AppIconHelper
         try
         {
             Stream? stream = WpfApplication.GetResourceStream(
-                new Uri("pack://application:,,,/SelectiveVpnRouter.ico", UriKind.Absolute))?.Stream;
+                new Uri("pack://application:,,,/" + IconFileName, UriKind.Absolute))?.Stream;
             if (stream is not null)
             {
                 var ms = new MemoryStream();
@@ -92,7 +94,7 @@ internal static class AppIconHelper
             }
 
             return Assembly.GetExecutingAssembly()
-                .GetManifestResourceStream("SelectiveVpnRouter.App.SelectiveVpnRouter.ico");
+                .GetManifestResourceStream("SelectiveVpnRouter.App." + IconFileName);
         }
         catch (IOException)
         {

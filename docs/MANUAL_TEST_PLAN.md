@@ -8,7 +8,7 @@ Record PASS / FAIL / notes for each.
 
 ## TEST 1 — No personal VPN
 
-- Do not start Selective VPN Router (or leave VPN disconnected).
+- Do not start VPN Route (or leave VPN disconnected).
 - Browser to a public site; ping or `Probe --http https://example.com`.
 - **Expect:** Internet works normally.
 

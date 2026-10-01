@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
-    [Parameter(Mandatory = $true)][string]$Ico
+    [Parameter(Mandatory = $true)][string]$Ico,
+    [switch]$Quiet
 )
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path $Exe)) { throw "Exe not found: $Exe" }
@@ -13,4 +14,8 @@ if (-not (Test-Path $rcedit)) {
 }
 & $rcedit $Exe --set-icon $Ico
 if ($LASTEXITCODE -ne 0) { throw "rcedit failed with exit code $LASTEXITCODE" }
-Write-Host "Applied icon to $Exe"
+if ($Quiet -and (Get-Command Write-SvrUpdateDetail -ErrorAction SilentlyContinue)) {
+    Write-SvrUpdateDetail "Applied icon to $Exe"
+} else {
+    Write-Host "Applied icon to $Exe"
+}

@@ -60,7 +60,7 @@ public sealed class PipeIpcHost : BackgroundService
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        await _engine.DisposeAsync().ConfigureAwait(false);
+        // RouterEngine is a DI singleton; Host disposes IAsyncDisposable singletons once on shutdown.
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -102,6 +102,24 @@ public sealed class PipeIpcHost : BackgroundService
             return new IpcResponse { Id = req?.Id ?? "", Ok = false, Error = "Invalid IPC request." };
         }
 
+        string? diagnosticName = null;
+        if (string.Equals(req.Method, IpcMethods.RunDiagnostic, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(req.PayloadJson))
+        {
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(req.PayloadJson);
+                if (doc.RootElement.TryGetProperty("name", out JsonElement n))
+                {
+                    diagnosticName = n.GetString();
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        ServiceRuntimeContext.SetIpcActivity(req.Method, diagnosticName);
         try
         {
             string payload = req.Method switch
@@ -127,7 +145,12 @@ public sealed class PipeIpcHost : BackgroundService
         }
         catch (Exception ex)
         {
+            _engine.Log("IPC dispatch error method=" + req.Method + " diagnostic=" + (diagnosticName ?? "(none)") + " error=" + ex.Message);
             return new IpcResponse { Id = req.Id, Ok = false, Error = ex.Message };
+        }
+        finally
+        {
+            ServiceRuntimeContext.ClearIpcActivity();
         }
     }
 
@@ -186,6 +209,7 @@ public sealed class PipeIpcHost : BackgroundService
     {
         string name = "admin";
         bool confirm = false;
+        string? requestExePath = null;
         if (!string.IsNullOrWhiteSpace(json))
         {
             using JsonDocument doc = JsonDocument.Parse(json);
@@ -197,9 +221,18 @@ public sealed class PipeIpcHost : BackgroundService
             {
                 confirm = true;
             }
+
+            if (doc.RootElement.TryGetProperty("exePath", out JsonElement exePathElement))
+            {
+                requestExePath = exePathElement.GetString();
+            }
+            else if (doc.RootElement.TryGetProperty("telegramExePath", out JsonElement telegramExePathElement))
+            {
+                requestExePath = telegramExePathElement.GetString();
+            }
         }
 
-        DiagnosticResult r = await _engine.RunDiagnosticAsync(name, ct, confirm).ConfigureAwait(false);
+        DiagnosticResult r = await _engine.RunDiagnosticAsync(name, ct, confirm, requestExePath).ConfigureAwait(false);
         return JsonSerializer.Serialize(r, ConfigSerializer.JsonOptions);
     }
 
@@ -215,7 +248,7 @@ public sealed class PipeIpcHost : BackgroundService
     {
         TempAppVpnRequest req = JsonSerializer.Deserialize<TempAppVpnRequest>(json ?? "{}", ConfigSerializer.JsonOptions)
             ?? throw new InvalidOperationException("Invalid temp app request.");
-        TempAppVpnStatus status = await _engine.ApplyTempAppVpnRouteAsync(req.ExePath).ConfigureAwait(false);
+        TempAppVpnStatus status = await _engine.ApplyTempAppVpnRouteAsync(req.ExePath, req.IdentityPathMode).ConfigureAwait(false);
         return JsonSerializer.Serialize(status, ConfigSerializer.JsonOptions);
     }
 

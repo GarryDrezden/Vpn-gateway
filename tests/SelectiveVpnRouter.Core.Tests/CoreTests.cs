@@ -594,6 +594,16 @@ public class ConnectVpnTimeoutArchitectureTests
     }
 
     [Fact]
+    public void PipeIpcHost_stop_does_not_dispose_router_engine_singleton()
+    {
+        string? repoRoot = FindRepoRoot();
+        Assert.NotNull(repoRoot);
+        string pipeHost = File.ReadAllText(Path.Combine(repoRoot, "src", "SelectiveVpnRouter.Service", "PipeIpcHost.cs"));
+        Assert.Contains("Host disposes IAsyncDisposable singletons", pipeHost, StringComparison.Ordinal);
+        Assert.DoesNotContain("await _engine.DisposeAsync()", pipeHost, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ServiceClient_uses_async_frame_io_for_operation_timeout()
     {
         string path = Path.Combine(FindRepoRoot()!, "src", "SelectiveVpnRouter.App", "ServiceClient.cs");

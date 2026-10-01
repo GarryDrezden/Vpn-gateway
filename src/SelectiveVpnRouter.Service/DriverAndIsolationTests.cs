@@ -6,7 +6,7 @@ using SelectiveVpnRouter.Network;
 
 namespace SelectiveVpnRouter.Service;
 
-internal static class DriverAndIsolationTests
+internal static partial class DriverAndIsolationTests
 {
     public static async Task<DiagnosticResult> RunAsync(RouterEngine engine, string name, bool confirm, CancellationToken ct)
         => name switch
@@ -24,6 +24,14 @@ internal static class DriverAndIsolationTests
             "temp-probe-rule" => await TempProbeRule(engine, apply: true).ConfigureAwait(false),
             "remove-temp-rule" => await TempProbeRule(engine, apply: false).ConfigureAwait(false),
             "transparent-routing" => await TransparentRouting(engine, ct).ConfigureAwait(false),
+            "wfp-probe-unicode-redirect" => await WfpProbeUnicodeRedirect(engine, ct).ConfigureAwait(false),
+            "wfp-probe-short-appid-ab" => await WfpProbeShortAppIdAb(engine, ct).ConfigureAwait(false),
+            "wfp-runtime-appid-capture" => await RunWfpRuntimeAppIdCapture(engine, ct).ConfigureAwait(false),
+            "wfp-runtime-appid-capture-abc" => await RunWfpRuntimeAppIdCaptureAbc(engine, ct).ConfigureAwait(false),
+            "wfp-runtime-appid-case" => await RunWfpRuntimeAppIdCase(engine, ct).ConfigureAwait(false),
+            "wfp-runtime-appid-blob" => await RunWfpRuntimeAppIdBlob(engine, ct).ConfigureAwait(false),
+            "wfp-runtime-appid-normalization-matrix" => await RunWfpRuntimeAppIdNormalizationMatrix(engine, ct).ConfigureAwait(false),
+            "wfp-telegram-appid-acceptance" => await RunWfpTelegramAppIdAcceptance(engine, ct).ConfigureAwait(false),
             "driver-stop" => Sc("driver-stop", "stop", confirm),
             "driver-uninstall" => await Script("driver-uninstall", "uninstall-driver.ps1", confirm, ct).ConfigureAwait(false),
             "preferred-default" => PreferredRoutes.Evaluate(engine.VpnAdapter?.Ipv4Index),
@@ -73,9 +81,26 @@ internal static class DriverAndIsolationTests
 
         CalloutArmStatus a = s.Callout;
         TransparentProxyDiagnostics p = s.ProxyDiagnostics;
+        string classifyDiag =
+            "classifyEntries=" + a.ClassifyEntries
+            + " exitNoWrite=" + a.ExitNoActionWrite
+            + " exitDisabled=" + a.ExitDisabled
+            + " exitProxyPid0=" + a.ExitProxyPidZero
+            + " exitProxyPort0=" + a.ExitProxyPortZero
+            + " exitRedirectHandleNull=" + a.ExitRedirectHandleNull
+            + " exitClassifyCtxNull=" + a.ExitClassifyContextNull
+            + " exitPid0=" + a.ExitPidZero
+            + " exitProxyPid=" + a.ExitProxyPid
+            + " acqClassifyFail=" + a.AcquireClassifyHandleFailures
+            + " acqWritableFail=" + a.AcquireWritableLayerDataFailures
+            + " loopbackProxy=" + a.AlreadyLoopbackProxy
+            + " allocFail=" + a.AllocationFailures
+            + " lastPid=" + a.LastClassifyPid
+            + " lastFilterId=" + a.LastFilterId
+            + " lastRights=0x" + a.LastRights.ToString("X");
         string msg = Bilingual(
-            $"device open, enabled={a.Enabled}, calloutId={a.CalloutId}, proxyPid={a.ProxyPid}, proxyPort={a.ProxyPort}, handles={a.OpenHandles}, attempts={a.RedirectAttempts}, applySuccess={a.RedirectApplySuccess}, applyFailures={a.RedirectApplyFailures}, lastApplyStatus=0x{a.LastRedirectApplyStatus:X8}, redirects(success)={a.Redirects}; proxy accepted={p.AcceptedConnections} ctxQueries={p.RedirectContextQueries} ctxSuccess={p.RedirectContextSuccess} ctxFailures={p.RedirectContextFailures} lastCtxErr={p.LastRedirectContextError}. Fail-open: last handle close disables redirect even if the .sys stays loaded.",
-            $"устройство открыто, enabled={a.Enabled}, calloutId={a.CalloutId}, proxyPid={a.ProxyPid}, proxyPort={a.ProxyPort}, handles={a.OpenHandles}, attempts={a.RedirectAttempts}, applySuccess={a.RedirectApplySuccess}, applyFailures={a.RedirectApplyFailures}, lastApplyStatus=0x{a.LastRedirectApplyStatus:X8}, redirects(успех)={a.Redirects}; proxy принято={p.AcceptedConnections} ctxQueries={p.RedirectContextQueries} ctxSuccess={p.RedirectContextSuccess} ctxFailures={p.RedirectContextFailures} lastCtxErr={p.LastRedirectContextError}. Fail-open: закрытие последнего handle отключает redirect, даже если .sys остаётся загруженным.");
+            $"device open, enabled={a.Enabled}, calloutId={a.CalloutId}, proxyPid={a.ProxyPid}, proxyPort={a.ProxyPort}, handles={a.OpenHandles}, attempts={a.RedirectAttempts}, applySuccess={a.RedirectApplySuccess}, applyFailures={a.RedirectApplyFailures}, lastApplyStatus=0x{a.LastRedirectApplyStatus:X8}, redirects(success)={a.Redirects}; {classifyDiag}; proxy accepted={p.AcceptedConnections} ctxQueries={p.RedirectContextQueries} ctxSuccess={p.RedirectContextSuccess} ctxFailures={p.RedirectContextFailures} lastCtxErr={p.LastRedirectContextError}. Fail-open: last handle close disables redirect even if the .sys stays loaded.",
+            $"устройство открыто, enabled={a.Enabled}, calloutId={a.CalloutId}, proxyPid={a.ProxyPid}, proxyPort={a.ProxyPort}, handles={a.OpenHandles}, attempts={a.RedirectAttempts}, applySuccess={a.RedirectApplySuccess}, applyFailures={a.RedirectApplyFailures}, lastApplyStatus=0x{a.LastRedirectApplyStatus:X8}, redirects(успех)={a.Redirects}; {classifyDiag}; proxy принято={p.AcceptedConnections} ctxQueries={p.RedirectContextQueries} ctxSuccess={p.RedirectContextSuccess} ctxFailures={p.RedirectContextFailures} lastCtxErr={p.LastRedirectContextError}. Fail-open: закрытие последнего handle отключает redirect, даже если .sys остаётся загруженным.");
         WfpPolicyDiagnostics wfp = s.WfpPolicy;
         if (!wfp.PolicyHealthy)
         {

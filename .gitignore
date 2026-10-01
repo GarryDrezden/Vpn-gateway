@@ -8,6 +8,10 @@ artifacts/
 *.sys
 *.cat
 
+## Local native tool build outputs (do not commit)
+*.obj
+/tools/**/*.exe
+
 ## Visual Studio / Rider / VS Code
 .vs/
 .idea/

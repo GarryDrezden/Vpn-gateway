@@ -222,6 +222,27 @@ public static class VpnAdapterReadiness
         }).ToArray();
     }
 
+    public static string? DescribeTunnelLocalWaitBlock(
+        string? tunnelLocalIpv4,
+        IEnumerable<VpnAdapterReadinessCandidate> candidates)
+    {
+        if (string.IsNullOrWhiteSpace(tunnelLocalIpv4))
+        {
+            return null;
+        }
+
+        bool matched = candidates.Any(c => c.Ipv4Addresses.Any(a =>
+            string.Equals(a.Address, tunnelLocalIpv4, StringComparison.OrdinalIgnoreCase)
+            && VpnTunnelIpv4Rules.IsUsableTunnelAddress(a)));
+        if (matched)
+        {
+            return null;
+        }
+
+        return "readiness-gate: OpenVPN tunnelLocal=" + tunnelLocalIpv4
+            + " but no Windows adapter has that IPv4 in Preferred/Deprecated/Unknown state";
+    }
+
     public static string FormatNotReadyDiagnostics(
         IEnumerable<VpnAdapterReadinessCandidate> candidates,
         string? routeGateway,

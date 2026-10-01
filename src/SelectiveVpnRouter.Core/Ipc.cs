@@ -113,6 +113,31 @@ public sealed record CalloutArmStatus
     public uint RedirectApplySuccess { get; init; }
     public uint RedirectApplyFailures { get; init; }
     public int LastRedirectApplyStatus { get; init; }
+    public uint ClassifyEntries { get; init; }
+    public uint ExitNoActionWrite { get; init; }
+    public uint ExitDisabled { get; init; }
+    public uint ExitProxyPidZero { get; init; }
+    public uint ExitProxyPortZero { get; init; }
+    public uint ExitRedirectHandleNull { get; init; }
+    public uint ExitClassifyContextNull { get; init; }
+    public uint ExitPidZero { get; init; }
+    public uint ExitProxyPid { get; init; }
+    public uint AcquireClassifyHandleFailures { get; init; }
+    public uint AcquireWritableLayerDataFailures { get; init; }
+    public uint AlreadyLoopbackProxy { get; init; }
+    public uint AllocationFailures { get; init; }
+    public ulong LastClassifyPid { get; init; }
+    public ulong LastFilterId { get; init; }
+    public uint LastRights { get; init; }
+    public uint StatusStructVersion { get; init; }
+    public uint RuntimeCaptureCount { get; init; }
+    public bool RuntimeAppIdPresent { get; init; }
+    public uint RuntimeAppIdByteLength { get; init; }
+    public uint RuntimeAppIdValueType { get; init; }
+    public ulong RuntimeProcessId { get; init; }
+    public ulong RuntimeFilterId { get; init; }
+    public uint RuntimeRights { get; init; }
+    public string RuntimeAppId { get; init; } = "";
 }
 
 public sealed record TransparentProxyDiagnostics

@@ -11,7 +11,7 @@ public partial class App : System.Windows.Application
         LayoutDebugOptions.Enabled = e.Args.Any(a => a.Equals("--layout-debug", StringComparison.OrdinalIgnoreCase));
         DispatcherUnhandledException += (_, args) =>
         {
-            MessageBox.Show(args.Exception.Message, "Selective VPN Router");
+            MessageBox.Show(args.Exception.Message, AppBranding.ProductName);
             args.Handled = true;
         };
 

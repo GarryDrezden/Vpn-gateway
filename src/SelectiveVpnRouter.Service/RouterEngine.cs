@@ -25,7 +25,8 @@ public sealed partial class RouterEngine : IAsyncDisposable
     private WfpPolicyDiagnostics _wfpPolicy = WfpPolicyDiagnostics.Empty;
     private CalloutDriverClient? _driver;
     private CancellationTokenSource? _loopCts;
-    private readonly CancellationTokenSource _serviceCts = new();
+    private readonly OwnedCancellationTokenSource _serviceCts = new();
+    private AsyncDisposeGate _disposeGate;
     private bool _paused;
     private AdapterView? _vpnAdapter;
     private VpnAdapterSelection? _vpnAdapterSelection;
@@ -113,9 +114,15 @@ public sealed partial class RouterEngine : IAsyncDisposable
         _vpn = new OpenVpnController();
         try
         {
+            OpenVpnVersionResult version = await OpenVpnController.ReadVersionAsync(exe).ConfigureAwait(false);
+            Log("openvpn-version " + (version.VersionLine ?? ("exit=" + version.ExitCode + " err=" + (version.Error ?? "?"))));
             Log("openvpn-start exe=" + exe);
             await _vpn.StartAsync(exe, profile, dco, ct).ConfigureAwait(false);
             Log("openvpn-started pid=" + (_vpn.Pid?.ToString() ?? "?"));
+            if (!string.IsNullOrWhiteSpace(_vpn.DiagnosticCommandLine))
+            {
+                Log("openvpn-cmdline " + _vpn.DiagnosticCommandLine);
+            }
 
             VpnAdapterSelection? selection = await VpnAdapterSelector.WaitForReadyAsync(
                 _beforeConnect,
@@ -126,6 +133,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
             {
                 IReadOnlyList<VpnAdapterReadinessCandidate> readinessCandidates =
                     VpnAdapterSelector.BuildCandidates(_beforeConnect, AdapterCatalog.All());
+                LogVpnAdapterReadinessFailure(readinessCandidates, _vpn);
                 string diagnostics = VpnAdapterSelector.FormatNotReadyMessage(readinessCandidates, _vpn);
                 throw new VpnTunnelNotReadyException(diagnostics, VpnConnectBudget.VpnAdapterReadinessMs);
             }
@@ -252,9 +260,24 @@ public sealed partial class RouterEngine : IAsyncDisposable
         _ = RefreshPolicyAsync();
     }
 
-    public async Task<DiagnosticResult> RunDiagnosticAsync(string name, CancellationToken ct, bool confirm = false)
+    public string? DiagnosticRequestExePath { get; private set; }
+
+    public async Task<DiagnosticResult> RunDiagnosticAsync(
+        string name,
+        CancellationToken ct,
+        bool confirm = false,
+        string? requestExePath = null)
     {
-        DiagnosticResult result = await DiagnosticCenter.RunAsync(this, name, ct, confirm).ConfigureAwait(false);
+        DiagnosticRequestExePath = requestExePath;
+        DiagnosticResult result;
+        try
+        {
+            result = await DiagnosticCenter.RunAsync(this, name, ct, confirm).ConfigureAwait(false);
+        }
+        finally
+        {
+            DiagnosticRequestExePath = null;
+        }
         _diagnostics.Enqueue(result);
         while (_diagnostics.Count > 80 && _diagnostics.TryDequeue(out _))
         {
@@ -307,11 +330,33 @@ public sealed partial class RouterEngine : IAsyncDisposable
     public TransparentTcpProxy? Proxy => _proxy;
     public CalloutDriverClient? Driver => _driver;
 
+    public WfpSession? Wfp => _wfp;
+
     public async ValueTask DisposeAsync()
     {
-        await DisconnectAsync().ConfigureAwait(false);
-        _serviceCts.Cancel();
-        _serviceCts.Dispose();
+        if (!_disposeGate.TryEnter())
+        {
+            Log("RouterEngine.DisposeAsync skipped (already disposing/disposed) pid=" + Environment.ProcessId);
+            return;
+        }
+
+        Log("RouterEngine.DisposeAsync enter pid=" + Environment.ProcessId
+            + " hostStopping=" + ServiceRuntimeContext.HostStopping
+            + " ipcMethod=" + (ServiceRuntimeContext.ActiveIpcMethod ?? "(none)")
+            + " diagnostic=" + (ServiceRuntimeContext.ActiveDiagnosticName ?? "(none)")
+            + " serviceCtsDisposed=" + _serviceCts.IsDisposed);
+        try
+        {
+            await DisconnectAsync().ConfigureAwait(false);
+            _serviceCts.Dispose();
+            Log("RouterEngine.DisposeAsync complete pid=" + Environment.ProcessId);
+        }
+        catch (Exception ex)
+        {
+            Log("RouterEngine.DisposeAsync error=" + ex.Message);
+            ServiceFatalLogger.Write("RouterEngine.DisposeAsync failed", ex);
+            throw;
+        }
     }
 
     internal void Log(string message)
@@ -319,6 +364,41 @@ public sealed partial class RouterEngine : IAsyncDisposable
         Directory.CreateDirectory(AppPaths.LogDirectory);
         string line = DateTimeOffset.Now.ToString("o") + " " + LogRedactor.Redact(message);
         File.AppendAllText(Path.Combine(AppPaths.LogDirectory, "service.log"), line + Environment.NewLine);
+    }
+
+    private void LogVpnAdapterReadinessFailure(IReadOnlyList<VpnAdapterReadinessCandidate> candidates, OpenVpnController openVpn)
+    {
+        Log("openvpn-signals routeGateway=" + (openVpn.RouteGateway ?? "(null)")
+            + " tunnelLocal=" + (openVpn.TunnelLocalIpv4 ?? "(null)")
+            + " ifconfigPeerOrMask=" + (openVpn.IfconfigPeerOrMask ?? "(null)")
+            + " connected=" + openVpn.Connected);
+
+        string? gate = VpnAdapterReadiness.DescribeTunnelLocalWaitBlock(openVpn.TunnelLocalIpv4, candidates);
+        if (gate is not null)
+        {
+            Log(gate);
+        }
+
+        foreach (VpnAdapterReadinessCandidate candidate in candidates.Where(c => c.LooksVpn || c.NewSinceBefore || c.ChangedSinceBefore))
+        {
+            string ipv4Detail = candidate.Ipv4Addresses.Count == 0
+                ? "(none)"
+                : string.Join(", ", candidate.Ipv4Addresses.Select(a => a.Address + "/" + a.PrefixLength + " " + a.DadState));
+            Log("readiness-candidate if=" + (candidate.Ipv4Index?.ToString() ?? "?")
+                + " name=" + candidate.Name
+                + " status=" + candidate.Status
+                + " ipv4=[" + ipv4Detail + "]");
+        }
+
+        foreach (string raw in openVpn.LogSnapshot)
+        {
+            if (!OpenVpnController.IsOpenVpnNegotiationLogLine(raw))
+            {
+                continue;
+            }
+
+            Log("openvpn-log: " + LogRedactor.Redact(raw));
+        }
     }
 
     public WfpPolicyDiagnostics WfpPolicy
@@ -341,8 +421,18 @@ public sealed partial class RouterEngine : IAsyncDisposable
         WfpPolicyApplyResult applyResult;
         try
         {
+            WfpAppFilterOptions? wfpOptions = _tempRealAppExePath is null
+                ? null
+                : new WfpAppFilterOptions
+                {
+                    IdentityPathMode = _tempRealAppWfpMode,
+                    WfpIdentitySourceOverride = _tempRealAppWfpIdentityOverride,
+                    WfpIdentityOverrideExePath = _tempRealAppWfpIdentityOverride is null
+                        ? null
+                        : _tempRealAppExePath,
+                };
             applyResult = _wfp is IWfpAppFilterInstaller installer
-                ? installer.ReplaceVpnAppFilters(vpnExes, ipv6)
+                ? installer.ReplaceVpnAppFilters(vpnExes, ipv6, wfpOptions)
                 : WfpPolicyApplyResult.NoSession(vpnExes);
         }
         catch (Exception ex)
@@ -502,6 +592,15 @@ public static class DiagnosticCenter
         }
         catch (Exception ex)
         {
+            if (string.Equals(name, "wfp-runtime-appid-case", StringComparison.Ordinal)
+                || string.Equals(name, "wfp-runtime-appid-blob", StringComparison.Ordinal)
+                || string.Equals(name, "wfp-runtime-appid-normalization-matrix", StringComparison.Ordinal)
+                || string.Equals(name, "wfp-telegram-appid-acceptance", StringComparison.Ordinal))
+            {
+                engine.Log(name + " exception: " + ex);
+                return Fail(name, ex.ToString());
+            }
+
             return Fail(name, ex.Message);
         }
     }

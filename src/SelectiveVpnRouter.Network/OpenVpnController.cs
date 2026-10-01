@@ -33,6 +33,8 @@ public sealed class OpenVpnController : IAsyncDisposable
     public bool Connected { get; private set; }
     public string? RouteGateway { get; private set; }
     public string? TunnelLocalIpv4 { get; private set; }
+    public string? IfconfigPeerOrMask { get; private set; }
+    public string? DiagnosticCommandLine { get; private set; }
     public IReadOnlyList<string> LogSnapshot => _log.ToArray();
 
     public static OpenVpnVersionResult ReadVersion(string exe)
@@ -100,6 +102,8 @@ public sealed class OpenVpnController : IAsyncDisposable
         {
             psi.ArgumentList.Add("--disable-dco");
         }
+
+        DiagnosticCommandLine = BuildDiagnosticCommandLine(psi);
 
         _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         _process.OutputDataReceived += (_, e) => Handle(e.Data);
@@ -171,6 +175,8 @@ public sealed class OpenVpnController : IAsyncDisposable
         _since = null;
         RouteGateway = null;
         TunnelLocalIpv4 = null;
+        IfconfigPeerOrMask = null;
+        DiagnosticCommandLine = null;
         TryDelete(_mgmtPasswordFile);
         _mgmtPasswordFile = null;
     }
@@ -220,6 +226,7 @@ public sealed class OpenVpnController : IAsyncDisposable
         if (ifc is { local: not null, peerOrMask: not null })
         {
             TunnelLocalIpv4 = ifc.Value.local;
+            IfconfigPeerOrMask = ifc.Value.peerOrMask;
             if (RouteGateway is null && !ifc.Value.peerOrMask.StartsWith("255.", StringComparison.Ordinal))
             {
                 RouteGateway = ifc.Value.peerOrMask;
@@ -264,6 +271,35 @@ public sealed class OpenVpnController : IAsyncDisposable
         l.Stop();
         return port;
     }
+
+    internal static string BuildDiagnosticCommandLine(ProcessStartInfo psi)
+    {
+        var parts = new List<string> { Quote(psi.FileName) };
+        foreach (string arg in psi.ArgumentList)
+        {
+            parts.Add(Quote(arg));
+        }
+
+        return string.Join(' ', parts);
+    }
+
+    public static bool IsOpenVpnNegotiationLogLine(string line)
+    {
+        return line.Contains("PUSH_REPLY", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("ifconfig ", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("route-gateway", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("topology ", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("TUN/TAP", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("Data Channel Offload", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("TAP-Windows", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("Initialization Sequence Completed", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("netsh", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("IPv4", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("dhcp-option", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string Quote(string value)
+        => value.Contains(' ') || value.Contains('"') ? "\"" + value.Replace("\"", "\\\"") + "\"" : value;
 
     private static void TryDelete(string? path)
     {

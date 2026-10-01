@@ -45,7 +45,7 @@ if ($sig.Status -ne "Valid" -and $testsigning) {
 sc.exe stop SelectiveVpnCallout 2>$null | Out-Null
 Start-Sleep -Milliseconds 400
 sc.exe delete SelectiveVpnCallout 2>$null | Out-Null
-$create = sc.exe create SelectiveVpnCallout type= kernel start= demand binPath= "$SysPath" DisplayName= "Selective VPN Router WFP callout"
+$create = sc.exe create SelectiveVpnCallout type= kernel start= demand binPath= "$SysPath" DisplayName= "VPN Route WFP callout"
 Write-Host $create
 sc.exe start SelectiveVpnCallout
 if ($LASTEXITCODE -ne 0) {

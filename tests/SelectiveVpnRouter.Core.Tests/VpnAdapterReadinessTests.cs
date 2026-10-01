@@ -100,6 +100,15 @@ public class VpnAdapterReadinessTests
     }
 
     [Fact]
+    public void I_tunnel_local_wait_block_when_windows_ip_differs()
+    {
+        var tap = Cand(8, "TAP #2", OperationalStatus.Up, true, true, ("10.28.0.3", Ipv4DadState.Preferred, 22));
+        string? gate = VpnAdapterReadiness.DescribeTunnelLocalWaitBlock("10.28.0.2", [tap]);
+        Assert.NotNull(gate);
+        Assert.Contains("10.28.0.2", gate, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void H_milestone_usable_tunnel_with_openvpn_signals_passes()
     {
         var tap = Cand(8, "OpenVPN TAP-Windows6", OperationalStatus.Up, true, true, ("10.28.0.7", Ipv4DadState.Preferred, 22));

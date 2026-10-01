@@ -6,7 +6,10 @@ public interface IWfpAppFilterInstaller
 {
     bool DriverPresent { get; }
 
-    WfpPolicyApplyResult ReplaceVpnAppFilters(IReadOnlyList<string> exePaths, Ipv6Policy ipv6);
+    WfpPolicyApplyResult ReplaceVpnAppFilters(
+        IReadOnlyList<string> exePaths,
+        Ipv6Policy ipv6,
+        WfpAppFilterOptions? options = null);
 
     void ClearFilters();
 }

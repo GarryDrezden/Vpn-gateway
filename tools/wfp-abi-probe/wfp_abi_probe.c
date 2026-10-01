@@ -74,6 +74,9 @@ static void print_fwpm_filter0(void) {
 int main(void) {
     print_fwp_data_types();
     print_guid("FWPM_CONDITION_ALE_APP_ID", &FWPM_CONDITION_ALE_APP_ID);
+    print_guid("FWPM_CONDITION_IP_PROTOCOL", &FWPM_CONDITION_IP_PROTOCOL);
+    print_guid("FWPM_CONDITION_IP_REMOTE_PORT", &FWPM_CONDITION_IP_REMOTE_PORT);
+    print_guid("FWPM_CONDITION_IP_REMOTE_ADDRESS", &FWPM_CONDITION_IP_REMOTE_ADDRESS);
     print_fwp_value0();
     print_fwp_condition_value0();
     print_fwp_byte_blob();

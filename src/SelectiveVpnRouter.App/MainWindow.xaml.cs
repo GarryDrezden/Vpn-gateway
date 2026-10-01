@@ -7,6 +7,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 using Microsoft.Win32;
 using SelectiveVpnRouter.Core;
 using Forms = System.Windows.Forms;
@@ -15,13 +17,19 @@ using Window = System.Windows.Window;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
 using Button = System.Windows.Controls.Button;
 using TextBox = System.Windows.Controls.TextBox;
+using RadioButton = System.Windows.Controls.RadioButton;
+using Color = System.Windows.Media.Color;
 
 namespace SelectiveVpnRouter.App;
 
 public partial class MainWindow : Window
 {
     private readonly ServiceClient _client = new();
-    private readonly ObservableCollection<RuleRow> _rules = [];
+    private readonly ObservableCollection<ApplicationRuleRow> _appRules = [];
+    private readonly ObservableCollection<ApplicationRuleRow> _filteredAppRules = [];
+    private readonly ObservableCollection<RuleRow> _advancedRules = [];
+    private readonly List<ConnectionFlowRow> _allFlowRows = [];
+    private ServiceSnapshot? _lastSnapshot;
     private readonly ObservableCollection<RealAppFlowHistoryRow> _realAppFlows = [];
     private readonly List<string> _resolvedTargetAddresses = [];
     private int _targetPort = 443;
@@ -41,9 +49,17 @@ public partial class MainWindow : Window
             LayoutDebugHelper.Attach(this, RootDock);
         }
 
-        RulesGrid.ItemsSource = _rules;
+        AppsList.ItemsSource = _filteredAppRules;
+        RulesGrid.ItemsSource = _advancedRules;
         RealAppFlowGrid.ItemsSource = _realAppFlows;
-        _tray.Text = "Selective VPN Router";
+        FlowSearchBox.TextChanged += (_, _) => RefreshFlowFilters();
+        FlowFilterAppCombo.SelectionChanged += (_, _) => RefreshFlowFilters();
+        FlowFilterAll.Click += OnFlowFilterChanged;
+        FlowFilterVpn.Click += OnFlowFilterChanged;
+        FlowFilterDirect.Click += OnFlowFilterChanged;
+        FlowFilterErrors.Click += OnFlowFilterChanged;
+        AppSearchBox.TextChanged += (_, _) => RefreshAppsFilter();
+        _tray.Text = AppBranding.ProductName;
         _tray.Visible = true;
         Icon = AppIconHelper.WpfIcon;
         _tray.Icon = AppIconHelper.CloneTrayIcon();
@@ -115,32 +131,323 @@ public partial class MainWindow : Window
             ServiceSnapshot? snap = await _client.SendOkAsync<ServiceSnapshot>(IpcMethods.GetStatus, null, _cts.Token);
             if (snap is null)
             {
+                SetServiceUnavailable(true);
                 return;
             }
 
-            string vpnStatus = snap.Vpn.Connected ? "VPN: подключён" : "VPN: отключён";
-            string driverStatus = snap.DriverLoaded ? "Драйвер: загружен" : "Драйвер: не загружен";
-            if (snap.Vpn.Connected)
-            {
-                string redirectStatus = snap.TransparentRedirectActive ? "Перенаправление: включено" : "Перенаправление: выкл.";
-                StatusLine.Text = $"{vpnStatus}    {driverStatus}    {redirectStatus}";
-            }
-            else
-            {
-                StatusLine.Text = $"{vpnStatus}    Служба: работает    {driverStatus}";
-            }
+            SetServiceUnavailable(false);
+            _lastSnapshot = snap;
+            bool vpnConnected = snap.Vpn.Connected;
+            UpdateHomeDashboard(snap, vpnConnected);
+            UpdateAppsVpnState(vpnConnected);
 
-            IfaceLine.Text = $"Напрямую: {snap.DirectAdapter?.Name ?? "—"}    VPN: {snap.VpnAdapter?.Name ?? "—"} if={snap.VpnAdapter?.Ipv4Index?.ToString() ?? "—"}  preferred default if={snap.PreferredDefault?.InterfaceIndex} metric={snap.PreferredDefault?.Metric}    owned 0/0 metric={snap.OwnedTransportDefault?.Metric.ToString() ?? "—"}";
-            FlowsGrid.ItemsSource = snap.Flows;
+            _allFlowRows.Clear();
+            _allFlowRows.AddRange(
+                FlowPresentationHelper.SelectUserFlows(snap.Flows).Select(f => new ConnectionFlowRow(f)));
+            UpdateFlowFilterAppCombo();
+            RefreshFlowFilters();
             LogBox.Text = string.Join(Environment.NewLine, snap.Vpn.RecentLog);
-            _tray.Text = snap.Vpn.Connected ? "Selective VPN Router — подключён" : "Selective VPN Router — отключён";
+            _tray.Text = vpnConnected ? AppBranding.ProductName + " — подключён" : AppBranding.ProductName + " — отключён";
             await RefreshTempRealAppStatusAsync();
         }
         catch (Exception)
         {
-            StatusLine.Text = "Служба Selective VPN Router не запущена.";
-            IfaceLine.Text = string.Empty;
+            SetServiceUnavailable(true);
         }
+    }
+
+    private void SetServiceUnavailable(bool unavailable)
+    {
+        ServiceBanner.Visibility = unavailable ? Visibility.Visible : Visibility.Collapsed;
+        if (!unavailable) { return; }
+        ServiceBannerText.Text = "Служба VPN Route недоступна.";
+        HomeVpnStatusText.Text = "Служба недоступна";
+        HomeVpnSubtitle.Text = "Запустите службу SelectiveVpnRouter и нажмите «Повторить».";
+        HomeVpnStatusDot.Fill = new SolidColorBrush(Color.FromRgb(0xDC, 0x26, 0x26));
+    }
+
+    private void UpdateHomePage(ServiceSnapshot snap, bool vpnConnected)
+    {
+        HomeVpnStatusText.Text = vpnConnected ? "Подключён" : "Отключён";
+        HomeVpnStatusDot.Fill = new SolidColorBrush(vpnConnected ? Color.FromRgb(0x05, 0x96, 0x69) : Color.FromRgb(0x9C, 0xA3, 0xAF));
+        HomeVpnSubtitle.Text = vpnConnected ? (snap.TransparentRedirectActive ? "Маршрутизация приложений активна" : "Маршрутизация приложений выключена") : "Приложения используют обычное подключение";
+        HomeProfileText.Text = string.IsNullOrWhiteSpace(ProfileBox.Text) ? "—" : System.IO.Path.GetFileNameWithoutExtension(ProfileBox.Text);
+        HomeDirectAdapterText.Text = snap.DirectAdapter?.Name ?? "—";
+        HomeVpnAdapterText.Text = vpnConnected ? snap.VpnAdapter?.Name ?? "—" : "—";
+        HomeAppsCountText.Text = ApplicationRulesHelper.CountVpnRoutedApplications(_appRules.Select(r => r.ToRule())).ToString();
+        HomeDriverDot.Fill = new SolidColorBrush(snap.DriverLoaded ? Color.FromRgb(0x05, 0x96, 0x69) : Color.FromRgb(0x9C, 0xA3, 0xAF));
+        HomeDriverText.Text = snap.DriverLoaded ? "Загружен" : "Не загружен";
+        ConnectVpnButton.Visibility = vpnConnected ? Visibility.Collapsed : Visibility.Visible;
+        DisconnectVpnButton.Visibility = vpnConnected ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdateHomeDashboard(ServiceSnapshot snap, bool vpnConnected)
+    {
+        UpdateHomePage(snap, vpnConnected);
+        HomeVpnAddressText.Text = snap.VpnAdapter?.Ipv4.FirstOrDefault() ?? "—";
+        DateTimeOffset activityCutoff = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var recentUserFlows = FlowPresentationHelper.SelectUserFlows(snap.Flows, 100)
+            .Where(f => f.UpdatedAt >= activityCutoff)
+            .ToList();
+        HomeRoutingActiveCountText.Text = _appRules.Count(row =>
+            recentUserFlows.Any(flow => ApplicationRulesHelper.PathsEqual(row.ExePath, flow.ProcessPath))).ToString();
+        HomeRoutingDirectCountText.Text = _appRules.Count(r => r.Mode == RouteMode.Direct).ToString();
+        HomeRoutingStatusText.Text = snap.TransparentRedirectActive
+            ? "Активна"
+            : vpnConnected ? "Ожидает" : "Не активна";
+        HomeActiveAppsList.ItemsSource = _appRules.Take(8).ToList();
+        HomeRecentFlowsGrid.ItemsSource = _allFlowRows.Take(10).ToList();
+    }
+
+    private void UpdateAppsVpnState(bool vpnConnected)
+    {
+        foreach (ApplicationRuleRow row in _appRules) { row.VpnConnected = vpnConnected; }
+    }
+
+    private void RefreshAppsFilter()
+    {
+        RouteMode? modeFilter = null;
+        if (AppFilterVpn.IsChecked == true)
+        {
+            modeFilter = RouteMode.Vpn;
+        }
+        else if (AppFilterDirect.IsChecked == true)
+        {
+            modeFilter = RouteMode.Direct;
+        }
+
+        HashSet<Guid> filteredIds = ApplicationRulesHelper.FilterApplicationRules(
+                _appRules.Select(r => r.ToRule()),
+                AppSearchBox.Text,
+                modeFilter)
+            .Select(r => r.Id)
+            .ToHashSet();
+
+        _filteredAppRules.Clear();
+        foreach (ApplicationRuleRow row in _appRules.Where(r => filteredIds.Contains(r.Id)))
+        {
+            _filteredAppRules.Add(row);
+        }
+
+        AppsEmptyPanel.Visibility = _appRules.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnAppFilterChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleButton clicked && clicked.IsChecked == true)
+        {
+            if (clicked != AppFilterAll)
+            {
+                AppFilterAll.IsChecked = false;
+            }
+
+            if (clicked != AppFilterVpn)
+            {
+                AppFilterVpn.IsChecked = false;
+            }
+
+            if (clicked != AppFilterDirect)
+            {
+                AppFilterDirect.IsChecked = false;
+            }
+        }
+        else if (AppFilterAll.IsChecked != true && AppFilterVpn.IsChecked != true && AppFilterDirect.IsChecked != true)
+        {
+            AppFilterAll.IsChecked = true;
+        }
+
+        RefreshAppsFilter();
+    }
+
+    private void UpdateFlowFilterAppCombo()
+    {
+        string? selected = FlowFilterAppCombo.SelectedItem as string;
+        List<string> apps = _allFlowRows
+            .Select(r => r.Application)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(a => a, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        FlowFilterAppCombo.Items.Clear();
+        FlowFilterAppCombo.Items.Add("Все приложения");
+        foreach (string app in apps)
+        {
+            FlowFilterAppCombo.Items.Add(app);
+        }
+
+        if (!string.IsNullOrWhiteSpace(selected) && FlowFilterAppCombo.Items.Contains(selected))
+        {
+            FlowFilterAppCombo.SelectedItem = selected;
+        }
+        else if (FlowFilterAppCombo.SelectedIndex < 0)
+        {
+            FlowFilterAppCombo.SelectedIndex = 0;
+        }
+    }
+
+    private void RefreshFlowFilters()
+    {
+        IEnumerable<ConnectionFlowRow> query = _allFlowRows;
+
+        if (FlowFilterVpn.IsChecked == true)
+        {
+            query = query.Where(r => r.Route == "VPN");
+        }
+        else if (FlowFilterDirect.IsChecked == true)
+        {
+            query = query.Where(r => r.Route == "Напрямую");
+        }
+
+        if (FlowFilterErrors.IsChecked == true)
+        {
+            query = query.Where(r => FlowStatusHelper.IsError(r.State) || FlowStatusHelper.IsCancelled(r.State));
+        }
+
+        string? appFilter = FlowFilterAppCombo.SelectedItem as string;
+        if (!string.IsNullOrWhiteSpace(appFilter)
+            && !string.Equals(appFilter, "Все приложения", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(r => string.Equals(r.Application, appFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        string search = FlowSearchBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(r =>
+                r.Application.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || r.Destination.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || r.State.Contains(search, StringComparison.OrdinalIgnoreCase));
+        }
+
+        FlowsGrid.ItemsSource = query.ToList();
+    }
+
+    private void OnFlowFilterChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleButton clicked && clicked.IsChecked == true)
+        {
+            if (clicked == FlowFilterAll || clicked == FlowFilterVpn || clicked == FlowFilterDirect)
+            {
+                if (clicked != FlowFilterAll)
+                {
+                    FlowFilterAll.IsChecked = false;
+                }
+
+                if (clicked != FlowFilterVpn)
+                {
+                    FlowFilterVpn.IsChecked = false;
+                }
+
+                if (clicked != FlowFilterDirect)
+                {
+                    FlowFilterDirect.IsChecked = false;
+                }
+            }
+        }
+        else if (FlowFilterAll.IsChecked != true && FlowFilterVpn.IsChecked != true && FlowFilterDirect.IsChecked != true)
+        {
+            FlowFilterAll.IsChecked = true;
+        }
+
+        RefreshFlowFilters();
+    }
+
+    private void OnNavigateApps(object sender, RoutedEventArgs e) => MainTabs.SelectedIndex = 1;
+
+    private void OnNavigateConnections(object sender, RoutedEventArgs e) => MainTabs.SelectedIndex = 2;
+
+    private void AppendDiagResult(string line)
+    {
+        DiagResults.Items.Insert(0, line);
+        if (line.StartsWith("FAIL", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("WARNING", StringComparison.OrdinalIgnoreCase))
+        {
+            DiagLogExpander.IsExpanded = true;
+        }
+    }
+
+    private static bool IsDiagnosticPass(string? outcome) =>
+        string.Equals(outcome, DiagnosticOutcomes.Pass, StringComparison.OrdinalIgnoreCase);
+
+    private async void OnRunBasicDiagnostics(object sender, RoutedEventArgs e)
+    {
+        string[] tests = BasicDiagnosticsOrchestration.SafeSteps;
+
+        int success = 0;
+        foreach (string name in tests)
+        {
+            try
+            {
+                DiagnosticResult? result = await _client.SendOkAsync<DiagnosticResult>(
+                    IpcMethods.RunDiagnostic,
+                    new { name, confirm = false },
+                    _cts.Token);
+                if (result is null)
+                {
+                    AppendDiagResult($"FAIL  {name}: no response");
+                    continue;
+                }
+
+                AppendDiagResult($"{result.Outcome}  {result.Name}: {result.Message}");
+                if (IsDiagnosticPass(result.Outcome))
+                {
+                    success++;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendDiagResult($"FAIL  {name}: {ex.Message}");
+            }
+        }
+
+        int failures = tests.Length - success;
+        BasicDiagSummaryText.Text = failures == 0
+            ? $"✓ {success}/{tests.Length} проверок успешно"
+            : $"⚠ {success}/{tests.Length} — {failures} проблем(а)";
+        if (failures > 0)
+        {
+            DiagLogExpander.IsExpanded = true;
+        }
+    }
+
+    private async void OnRetryService(object sender, RoutedEventArgs e)
+    {
+        _config = await LoadConfigFromServiceOrDiskAsync();
+        ApplyConfigToUi(_config);
+        await RefreshAsync(force: true);
+    }
+
+    private async Task AddApplicationRuleAsync(string exePath)
+    {
+        ApplicationRuleAddResult result = ApplicationRulesHelper.TryAddApplicationRule(_config, exePath);
+        if (result.IsDuplicate) { MessageBox.Show("Это приложение уже добавлено.", AppBranding.ProductName); return; }
+        if (!result.Ok || result.Config is null || result.Rule is null) { MessageBox.Show(result.Error ?? "Error", AppBranding.ProductName); return; }
+        await SaveConfigAsync(result.Config);
+        _appRules.Add(new ApplicationRuleRow(result.Rule, await IsVpnConnectedAsync()));
+        RefreshAppsFilter();
+    }
+
+    private async void OnAppRouteToggle(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton toggle || toggle.DataContext is not ApplicationRuleRow row) { return; }
+        RouteMode newMode = string.Equals(toggle.Tag as string, "Direct", StringComparison.OrdinalIgnoreCase) ? RouteMode.Direct : RouteMode.Vpn;
+        if (row.Mode == newMode) { return; }
+        AppConfiguration? updated = ApplicationRulesHelper.TrySetApplicationRouteMode(_config, row.Id, newMode);
+        if (updated is null) { return; }
+        await SaveConfigAsync(updated);
+        row.Mode = newMode;
+    }
+
+    private async void OnRemoveAppRule(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: Guid id }) { return; }
+        ApplicationRuleRow? row = _appRules.FirstOrDefault(r => r.Id == id);
+        if (row is null) { return; }
+        AppConfiguration? updated = ApplicationRulesHelper.TryRemoveApplicationRule(_config, id);
+        if (updated is null) { return; }
+        await SaveConfigAsync(updated);
+        _appRules.Remove(row);
+        RefreshAppsFilter();
     }
 
     private void ApplyConfigToUi(AppConfiguration cfg)
@@ -156,11 +463,11 @@ public partial class MainWindow : Window
             Ipv6Policy.AllowDirect => 3,
             _ => 2,
         };
-        _rules.Clear();
-        foreach (RoutingRule r in cfg.Rules)
-        {
-            _rules.Add(RuleRow.From(r));
-        }
+        _appRules.Clear();
+        foreach (RoutingRule rule in ApplicationRulesHelper.GetPermanentApplicationRules(cfg)) { _appRules.Add(new ApplicationRuleRow(rule, false)); }
+        _advancedRules.Clear();
+        foreach (RoutingRule r in cfg.Rules.Where(r => r.Type != RuleType.Application)) { _advancedRules.Add(RuleRow.From(r)); }
+        RefreshAppsFilter();
     }
 
     private AppConfiguration ReadConfigFromUi()
@@ -180,10 +487,16 @@ public partial class MainWindow : Window
             },
             PublicIpEndpoint = _config.Vpn.PublicIpEndpoint,
         };
+        List<RoutingRule> diagnosticRules = _config.Rules
+            .Where(ApplicationRulesHelper.IsDiagnosticApplicationRule)
+            .ToList();
         return new AppConfiguration
         {
             Vpn = vpn,
-            Rules = _rules.Select(r => r.ToRule()).ToList(),
+            Rules = _appRules.Select(r => r.ToRule())
+                .Concat(_advancedRules.Select(r => r.ToRule()))
+                .Concat(diagnosticRules)
+                .ToList(),
             Ui = _config.Ui,
         };
     }
@@ -203,15 +516,11 @@ public partial class MainWindow : Window
         await Call(IpcMethods.EmergencyRestore);
     }
 
-    private void OnAddApp(object sender, RoutedEventArgs e)
+    private async void OnAddApp(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Filter = "Программы (*.exe)|*.exe" };
-        if (dlg.ShowDialog() != true)
-        {
-            return;
-        }
-
-        _rules.Add(RuleRow.From(RoutingRule.Create(RuleType.Application, Path.GetFileNameWithoutExtension(dlg.FileName), dlg.FileName, RouteMode.Vpn)));
+        var dlg = new OpenFileDialog { Filter = "Applications (*.exe)|*.exe" };
+        if (dlg.ShowDialog() != true) { return; }
+        try { await AddApplicationRuleAsync(dlg.FileName); } catch (Exception ex) { MessageBox.Show(ex.Message, AppBranding.ProductName); }
     }
 
     private void OnAddDomain(object sender, RoutedEventArgs e)
@@ -222,7 +531,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _rules.Add(RuleRow.From(RoutingRule.Create(RuleType.Domain, host, host, RouteMode.Vpn)));
+        _advancedRules.Add(RuleRow.From(RoutingRule.Create(RuleType.Domain, host, host, RouteMode.Vpn)));
     }
 
     private void OnAddCidr(object sender, RoutedEventArgs e)
@@ -233,14 +542,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        _rules.Add(RuleRow.From(RoutingRule.Create(RuleType.Cidr, cidr, cidr, RouteMode.Vpn)));
+        _advancedRules.Add(RuleRow.From(RoutingRule.Create(RuleType.Cidr, cidr, cidr, RouteMode.Vpn)));
     }
 
     private void OnRemoveRule(object sender, RoutedEventArgs e)
     {
         if (RulesGrid.SelectedItem is RuleRow row)
         {
-            _rules.Remove(row);
+            _advancedRules.Remove(row);
         }
     }
 
@@ -248,24 +557,33 @@ public partial class MainWindow : Window
 
     private async void OnSaveSetup(object sender, RoutedEventArgs e)
     {
-        if (!string.IsNullOrWhiteSpace(FirstAppBox.Text) && File.Exists(FirstAppBox.Text)
-            && !_rules.Any(r => r.Type == RuleType.Application && string.Equals(r.Target, FirstAppBox.Text, StringComparison.OrdinalIgnoreCase)))
+        if (!string.IsNullOrWhiteSpace(FirstAppBox.Text) && File.Exists(FirstAppBox.Text))
         {
-            _rules.Add(RuleRow.From(RoutingRule.Create(RuleType.Application, Path.GetFileNameWithoutExtension(FirstAppBox.Text), FirstAppBox.Text, RouteMode.Vpn)));
+            ApplicationRuleAddResult add = ApplicationRulesHelper.TryAddApplicationRule(_config, FirstAppBox.Text);
+            if (add.Ok && add.Config is not null && add.Rule is not null)
+            {
+                _config = add.Config;
+                _appRules.Add(new ApplicationRuleRow(add.Rule, await IsVpnConnectedAsync()));
+                RefreshAppsFilter();
+            }
         }
 
         await SaveConfigAsync();
-        WizardHint.Text = "Сохранено. Подключите VPN и откройте «Тестирование». Добавьте git.exe как «Напрямую», если Cursor должен идти через VPN, а git — через рабочую сеть.";
+        WizardHint.Text = "Настройки сохранены. Подключите VPN на главной вкладке.";
     }
 
-    private void OnAddGitDirect(object sender, RoutedEventArgs e)
+    private async void OnAddGitDirect(object sender, RoutedEventArgs e)
     {
-        if (_rules.Any(r => r.Type == RuleType.Application && r.Target.EndsWith("git.exe", StringComparison.OrdinalIgnoreCase)))
+        if (_appRules.Any(r => r.ExePath.Equals("git.exe", StringComparison.OrdinalIgnoreCase))
+            || _advancedRules.Any(r => r.Target.Equals("git.exe", StringComparison.OrdinalIgnoreCase)))
         {
             return;
         }
 
-        _rules.Add(RuleRow.From(RoutingRule.Create(RuleType.Application, "git", "git.exe", RouteMode.Direct)));
+        RoutingRule rule = RoutingRule.Create(RuleType.Application, "git", "git.exe", RouteMode.Direct);
+        AppConfiguration updated = _config with { Rules = _config.Rules.Concat([rule]).ToList() };
+        await SaveConfigAsync(updated);
+        _advancedRules.Add(RuleRow.From(rule));
     }
 
     private void OnBrowseExe(object sender, RoutedEventArgs e)
@@ -648,7 +966,7 @@ public partial class MainWindow : Window
                 : "Изменяется только состояние драйвера/службы. TESTSIGNING, Secure Boot, HVCI и BitLocker НЕ меняются.";
             if (MessageBox.Show(extra + "\n\nПродолжить: " + name + "?", "Подтверждение", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
             {
-                DiagResults.Items.Insert(0, "WARNING  " + name + ": отменено");
+                AppendDiagResult("WARNING  " + name + ": отменено");
                 return;
             }
 
@@ -660,19 +978,20 @@ public partial class MainWindow : Window
             DiagnosticResult? r = await _client.SendOkAsync<DiagnosticResult>(IpcMethods.RunDiagnostic, new { name, confirm }, _cts.Token);
             if (r is not null)
             {
-                DiagResults.Items.Insert(0, $"{r.Outcome}  {r.Name}: {r.Message}");
+                AppendDiagResult($"{r.Outcome}  {r.Name}: {r.Message}");
             }
         }
         catch (Exception ex)
         {
-            DiagResults.Items.Insert(0, "FAIL  " + name + ": " + ex.Message);
+            AppendDiagResult("FAIL  " + name + ": " + ex.Message);
         }
     }
 
-    private async Task SaveConfigAsync()
+    private async Task SaveConfigAsync(AppConfiguration? config = null)
     {
-        _config = ReadConfigFromUi();
+        _config = config ?? ReadConfigFromUi();
         await _client.SendOkAsync<AppConfiguration>(IpcMethods.SetConfig, _config, _cts.Token);
+        HomeAppsCountText.Text = ApplicationRulesHelper.CountVpnRoutedApplications(_appRules.Select(r => r.ToRule())).ToString();
     }
 
     private ConnectVpnRequest BuildConnectVpnRequestFromUi() =>
@@ -776,7 +1095,6 @@ public partial class MainWindow : Window
         DisconnectVpnButton.IsEnabled = !busy;
         if (busy)
         {
-            StatusLine.Text = "VPN: подключение...";
         }
     }
 
