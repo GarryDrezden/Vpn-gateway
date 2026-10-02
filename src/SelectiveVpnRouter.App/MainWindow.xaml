@@ -53,7 +53,7 @@
                 <TextBlock Text="Состояние VPN" Style="{StaticResource SectionTitleText}" Margin="0,0,0,12"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                   <Ellipse x:Name="HomeVpnStatusDot" Width="12" Height="12" Fill="#9CA3AF" VerticalAlignment="Center"/>
-                  <TextBlock x:Name="HomeVpnStatusText" Text="Отключён" FontSize="20" FontWeight="SemiBold"
+                  <TextBlock x:Name="HomeVpnStatusText" Text="VPN Route off" FontSize="20" FontWeight="SemiBold"
                              Foreground="{StaticResource TextPrimaryBrush}" Margin="10,0,0,0"/>
                 </StackPanel>
                 <TextBlock x:Name="HomeVpnSubtitle" Text="Приложения используют обычное подключение"
@@ -177,7 +177,7 @@
           <StackPanel Grid.Row="2">
             <DockPanel Margin="0,0,0,8">
               <Button DockPanel.Dock="Right" Content="Все соединения →" Click="OnNavigateConnections" Style="{StaticResource GhostButton}"/>
-              <TextBlock Text="Последние соединения" Style="{StaticResource SectionTitleText}" VerticalAlignment="Center"/>
+              <TextBlock Text="Недавние соединения" Style="{StaticResource SectionTitleText}" VerticalAlignment="Center"/>
             </DockPanel>
             <Border Style="{StaticResource CardBorder}" Padding="0">
               <DataGrid x:Name="HomeRecentFlowsGrid" MinHeight="120" RowHeight="32" FontSize="12"
@@ -270,23 +270,26 @@
                         <RadioButton Content="Напрямую" Tag="Direct" GroupName="{Binding Id}" Margin="8,0,0,0"
                                      IsChecked="{Binding IsDirectSelected, Mode=OneWay}" Checked="OnAppRouteToggle"/>
                       </StackPanel>
-                      <TextBlock Grid.Column="3" Text="{Binding StatusText}" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis">
-                        <TextBlock.Style>
-                          <Style TargetType="TextBlock">
-                            <Style.Triggers>
-                              <DataTrigger Binding="{Binding StatusBrushKey}" Value="StatusSuccess">
-                                <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
-                              </DataTrigger>
-                              <DataTrigger Binding="{Binding StatusBrushKey}" Value="StatusWaiting">
-                                <Setter Property="Foreground" Value="{StaticResource WaitingBrush}"/>
-                              </DataTrigger>
-                              <DataTrigger Binding="{Binding StatusBrushKey}" Value="StatusNeutral">
-                                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-                              </DataTrigger>
-                            </Style.Triggers>
-                          </Style>
-                        </TextBlock.Style>
-                      </TextBlock>
+                      <StackPanel Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <TextBlock Text="{Binding StatusText}" FontSize="12" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right">
+                          <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                              <Style.Triggers>
+                                <DataTrigger Binding="{Binding StatusBrushKey}" Value="StatusSuccess">
+                                  <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding StatusBrushKey}" Value="StatusWaiting">
+                                  <Setter Property="Foreground" Value="{StaticResource WaitingBrush}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding StatusBrushKey}" Value="StatusNeutral">
+                                  <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                </DataTrigger>
+                              </Style.Triggers>
+                            </Style>
+                          </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock Text="{Binding ConfiguredRouteText}" Style="{StaticResource SecondaryText}" FontSize="11" HorizontalAlignment="Right"/>
+                      </StackPanel>
                       <Button Grid.Column="4" Content="Удалить" Tag="{Binding Id}" Click="OnRemoveAppRule"
                               Style="{StaticResource DangerButton}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </Grid>
@@ -300,36 +303,211 @@
 
       <!-- CONNECTIONS -->
       <TabItem Header="Соединения">
-        <DockPanel Margin="4">
-          <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="12" Margin="0,0,0,12">
-            <StackPanel>
-              <TextBlock Text="TCP-соединения приложений. Полезная нагрузка не записывается."
-                         Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-              <DockPanel LastChildFill="True" Margin="0,0,0,8">
-                <ComboBox x:Name="FlowFilterAppCombo" DockPanel.Dock="Right" Width="220" Margin="12,0,0,0"
-                          ToolTip="Фильтр по приложению"/>
-                <TextBox x:Name="FlowSearchBox" ToolTip="Поиск по назначению или приложению"/>
-              </DockPanel>
-              <StackPanel Orientation="Horizontal">
-                <ToggleButton x:Name="FlowFilterAll" Content="Все" Style="{StaticResource RouteToggleButton}" IsChecked="True" Margin="0,0,6,0"/>
-                <ToggleButton x:Name="FlowFilterVpn" Content="VPN" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"/>
-                <ToggleButton x:Name="FlowFilterDirect" Content="Напрямую" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"/>
-                <ToggleButton x:Name="FlowFilterErrors" Content="Ошибки" Style="{StaticResource RouteToggleButton}"/>
+        <Grid Margin="4">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition x:Name="ConnectionsMainColumn" Width="*"/>
+            <ColumnDefinition x:Name="ConnectionsDetailGapColumn" Width="0"/>
+            <ColumnDefinition x:Name="ConnectionsDetailColumn" Width="0"/>
+          </Grid.ColumnDefinitions>
+          <DockPanel Grid.Column="0">
+            <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="12" Margin="0,0,0,12">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,8" LastChildFill="True">
+                  <TextBlock DockPanel.Dock="Right" x:Name="ConnectionsRoutingStatusText" Text="VPN Route отключён"
+                             FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
+                  <StackPanel>
+                    <TextBlock Text="Соединения" Style="{StaticResource SectionTitleText}"/>
+                    <TextBlock x:Name="ConnectionsSummaryText" Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                  </StackPanel>
+                </DockPanel>
+                <TextBlock Text="TCP-соединения приложений (группировка по приложению). Полезная нагрузка не записывается."
+                           Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                <Grid Margin="0,0,0,8">
+                  <TextBox x:Name="FlowSearchBox"
+                           ToolTip="Поиск: приложение, путь, удалённый адрес"/>
+                  <TextBlock x:Name="FlowSearchPlaceholder" Text="Поиск по приложению, пути или адресу…"
+                             IsHitTestVisible="False" Margin="12,0,0,0" VerticalAlignment="Center"
+                             Foreground="{StaticResource TextSecondaryBrush}"/>
+                </Grid>
+                <StackPanel Orientation="Horizontal">
+                  <ToggleButton x:Name="FlowFilterAll" Content="Все" Style="{StaticResource RouteToggleButton}" IsChecked="True" Margin="0,0,6,0"/>
+                  <ToggleButton x:Name="FlowFilterVpn" Content="VPN" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"/>
+                  <ToggleButton x:Name="FlowFilterDirect" Content="Напрямую" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"/>
+                  <ToggleButton x:Name="FlowFilterMixed" Content="Смешано" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"/>
+                  <ToggleButton x:Name="FlowFilterErrors" Content="Ошибки" Style="{StaticResource RouteToggleButton}"/>
+                </StackPanel>
               </StackPanel>
-            </StackPanel>
+            </Border>
+
+            <Border x:Name="ConnectionsDisconnectedPanel" DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="24" Margin="0,0,0,12" Visibility="Collapsed">
+              <TextBlock Text="VPN Route отключён. Подключите VPN Route на главной вкладке, чтобы видеть активную маршрутизацию."
+                         TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center" Style="{StaticResource SecondaryText}"/>
+            </Border>
+            <Border x:Name="ConnectionsNoTrafficPanel" DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="24" Margin="0,0,0,12" Visibility="Collapsed">
+              <TextBlock Text="Нет активных соединений. Трафик появится здесь, когда настроенные приложения установят TCP-соединения."
+                         TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center" Style="{StaticResource SecondaryText}"/>
+            </Border>
+
+            <ScrollViewer x:Name="ConnectionsListScroll" VerticalScrollBarVisibility="Auto">
+              <StackPanel>
+                <TextBlock Text="АКТИВНЫЕ СЕЙЧАС" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Margin="4,0,0,6"/>
+                <ListView x:Name="ConnectionGroupsList" BorderThickness="0" Background="Transparent"
+                          SelectionChanged="OnConnectionGroupSelectionChanged"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                  <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem" BasedOn="{StaticResource ConnectionListViewItemStyle}"/>
+                  </ListView.ItemContainerStyle>
+                  <ListView.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorder}" Padding="0">
+                        <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Background="Transparent" BorderThickness="0"
+                                  FocusVisualStyle="{x:Null}">
+                          <Expander.Header>
+                            <Grid Margin="4">
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                              </Grid.ColumnDefinitions>
+                              <StackPanel Grid.Column="0">
+                                <StackPanel Orientation="Horizontal">
+                                  <TextBlock Text="{Binding Projection.ApplicationName}" FontSize="15" FontWeight="SemiBold" Margin="0,0,8,0"/>
+                                  <Border Padding="8,3" CornerRadius="4" VerticalAlignment="Center">
+                                    <Border.Style>
+                                      <Style TargetType="Border">
+                                        <Setter Property="Background" Value="#F3F4F6"/>
+                                        <Style.Triggers>
+                                          <DataTrigger Binding="{Binding Projection.RouteBadgeKey}" Value="RouteBadgeVpn">
+                                            <Setter Property="Background" Value="#EFF6FF"/>
+                                          </DataTrigger>
+                                          <DataTrigger Binding="{Binding Projection.RouteBadgeKey}" Value="RouteBadgeDirect">
+                                            <Setter Property="Background" Value="#F3F4F6"/>
+                                          </DataTrigger>
+                                          <DataTrigger Binding="{Binding Projection.RouteBadgeKey}" Value="RouteBadgeMixed">
+                                            <Setter Property="Background" Value="#FFF7ED"/>
+                                          </DataTrigger>
+                                        </Style.Triggers>
+                                      </Style>
+                                    </Border.Style>
+                                    <TextBlock Text="{Binding Projection.RouteSummaryLabel}" Foreground="{StaticResource TextPrimaryBrush}" Style="{StaticResource RouteBadgeText}"/>
+                                  </Border>
+                                </StackPanel>
+                                <TextBlock Text="{Binding Projection.ProcessPath}" Style="{StaticResource SecondaryText}" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="{Binding Projection.ProcessPath}"/>
+                                <TextBlock Text="{Binding Projection.MixedBreakdown}" Style="{StaticResource SecondaryText}" FontSize="11"/>
+                              </StackPanel>
+                              <TextBlock Grid.Column="1" Text="{Binding Projection.ActiveCountLabel}" VerticalAlignment="Center" Margin="12,0"
+                                         Style="{StaticResource SecondaryText}"/>
+                              <TextBlock Grid.Column="2" Text="{Binding Projection.StateSummary}" VerticalAlignment="Center" FontWeight="SemiBold" MinWidth="90"/>
+                            </Grid>
+                          </Expander.Header>
+                          <ListView ItemsSource="{Binding Projection.ActiveEndpointAggregates}" Margin="12,0,12,12"
+                                    BorderThickness="0" Background="Transparent"
+                                    SelectionChanged="OnConnectionEndpointSelectionChanged"
+                                    ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListView.ItemContainerStyle>
+                              <Style TargetType="ListViewItem" BasedOn="{StaticResource ConnectionListViewItemStyle}">
+                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="Padding" Value="0"/>
+                              </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                              <DataTemplate>
+                                <Border BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="0,1,0,0" Padding="8,6">
+                                  <Grid>
+                                    <Grid.ColumnDefinitions>
+                                      <ColumnDefinition Width="*"/>
+                                      <ColumnDefinition Width="44"/>
+                                      <ColumnDefinition Width="96"/>
+                                      <ColumnDefinition Width="108"/>
+                                      <ColumnDefinition Width="64"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding RemoteEndpoint}" FontFamily="Consolas" FontSize="12" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding CountSuffix}" Style="{StaticResource SecondaryText}" FontSize="12"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <Border Grid.Column="2" Padding="8,3" CornerRadius="4" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="4,0,0,0">
+                                      <Border.Style>
+                                        <Style TargetType="Border">
+                                          <Setter Property="Background" Value="#F3F4F6"/>
+                                          <Style.Triggers>
+                                            <DataTrigger Binding="{Binding RouteBadgeKey}" Value="RouteBadgeVpn">
+                                              <Setter Property="Background" Value="#EFF6FF"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding RouteBadgeKey}" Value="RouteBadgeDirect">
+                                              <Setter Property="Background" Value="#F3F4F6"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding RouteBadgeKey}" Value="RouteBadgeWarning">
+                                              <Setter Property="Background" Value="#FEF3C7"/>
+                                            </DataTrigger>
+                                          </Style.Triggers>
+                                        </Style>
+                                      </Border.Style>
+                                      <TextBlock Text="{Binding RouteLabel}" Style="{StaticResource RouteBadgeText}"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="3" Text="{Binding DisplayStateLabel}" Style="{StaticResource SecondaryText}" FontSize="12"
+                                               VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                    <TextBlock Grid.Column="4" Text="{Binding SampleFlow.UpdatedAtLocalText}" Style="{StaticResource SecondaryText}" FontSize="11"
+                                               HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                  </Grid>
+                                </Border>
+                              </DataTemplate>
+                            </ListView.ItemTemplate>
+                          </ListView>
+                        </Expander>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+
+                <TextBlock Text="НЕДАВНО ЗАКРЫТЫЕ" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Margin="4,12,0,6"/>
+                <ListView x:Name="ConnectionRecentGroupsList" BorderThickness="0" Background="Transparent"
+                          SelectionChanged="OnConnectionGroupSelectionChanged"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                  <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                      <Setter Property="Padding" Value="0"/>
+                      <Setter Property="Margin" Value="0,0,0,8"/>
+                      <Setter Property="Background" Value="Transparent"/>
+                    </Style>
+                  </ListView.ItemContainerStyle>
+                  <ListView.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource CardBorder}" Padding="12">
+                        <StackPanel>
+                          <TextBlock Text="{Binding Projection.ApplicationName}" FontWeight="SemiBold"/>
+                          <TextBlock Text="{Binding Projection.ProcessPath}" Style="{StaticResource SecondaryText}" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                          <ItemsControl ItemsSource="{Binding Projection.RecentFlows}" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <TextBlock FontFamily="Consolas" FontSize="12" Style="{StaticResource SecondaryText}">
+                                  <Run Text="{Binding RemoteEndpoint}"/>
+                                  <Run Text="  "/>
+                                  <Run Text="{Binding RouteLabel}"/>
+                                  <Run Text="  "/>
+                                  <Run Text="{Binding DisplayStateLabel}"/>
+                                </TextBlock>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </StackPanel>
+            </ScrollViewer>
+          </DockPanel>
+
+          <Border x:Name="ConnectionDetailsPanel" Grid.Column="2" Style="{StaticResource CardBorder}" Visibility="Collapsed">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+              <StackPanel>
+                <TextBlock Text="Детали" Style="{StaticResource SectionTitleText}" Margin="0,0,0,10"/>
+                <TextBlock x:Name="ConnectionDetailsText" TextWrapping="Wrap" Style="{StaticResource SecondaryText}"/>
+              </StackPanel>
+            </ScrollViewer>
           </Border>
-          <Border Style="{StaticResource CardBorder}" Padding="0">
-            <DataGrid x:Name="FlowsGrid" MinHeight="120">
-              <DataGrid.Columns>
-                <DataGridTextColumn Header="Приложение" Binding="{Binding Application}" Width="140"/>
-                <DataGridTextColumn Header="Назначение" Binding="{Binding Destination}" Width="*"/>
-                <DataGridTextColumn Header="Маршрут" Binding="{Binding Route}" Width="90"/>
-                <DataGridTextColumn Header="Состояние" Binding="{Binding State}" Width="120"/>
-                <DataGridTextColumn Header="Обновлено" Binding="{Binding Time}" Width="90"/>
-              </DataGrid.Columns>
-            </DataGrid>
-          </Border>
-        </DockPanel>
+        </Grid>
       </TabItem>
 
       <!-- DIAGNOSTICS -->

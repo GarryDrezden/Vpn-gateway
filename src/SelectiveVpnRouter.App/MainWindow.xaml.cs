@@ -29,6 +29,11 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<ApplicationRuleRow> _filteredAppRules = [];
     private readonly ObservableCollection<RuleRow> _advancedRules = [];
     private readonly List<ConnectionFlowRow> _allFlowRows = [];
+    private readonly ObservableCollection<ConnectionGroupViewModel> _connectionGroups = [];
+    private readonly ObservableCollection<ConnectionGroupViewModel> _connectionRecentGroups = [];
+    private readonly HashSet<string> _expandedConnectionGroups = new(StringComparer.OrdinalIgnoreCase);
+    private string? _selectedConnectionGroupKey;
+    private string? _selectedConnectionEndpointKey;
     private ServiceSnapshot? _lastSnapshot;
     private readonly ObservableCollection<RealAppFlowHistoryRow> _realAppFlows = [];
     private readonly List<string> _resolvedTargetAddresses = [];
@@ -52,11 +57,18 @@ public partial class MainWindow : Window
         AppsList.ItemsSource = _filteredAppRules;
         RulesGrid.ItemsSource = _advancedRules;
         RealAppFlowGrid.ItemsSource = _realAppFlows;
-        FlowSearchBox.TextChanged += (_, _) => RefreshFlowFilters();
-        FlowFilterAppCombo.SelectionChanged += (_, _) => RefreshFlowFilters();
+        ConnectionGroupsList.ItemsSource = _connectionGroups;
+        ConnectionRecentGroupsList.ItemsSource = _connectionRecentGroups;
+        FlowSearchBox.TextChanged += (_, _) =>
+        {
+            UpdateFlowSearchPlaceholder();
+            RefreshConnectionsBoard();
+        };
+        UpdateFlowSearchPlaceholder();
         FlowFilterAll.Click += OnFlowFilterChanged;
         FlowFilterVpn.Click += OnFlowFilterChanged;
         FlowFilterDirect.Click += OnFlowFilterChanged;
+        FlowFilterMixed.Click += OnFlowFilterChanged;
         FlowFilterErrors.Click += OnFlowFilterChanged;
         AppSearchBox.TextChanged += (_, _) => RefreshAppsFilter();
         _tray.Text = AppBranding.ProductName;
@@ -139,13 +151,12 @@ public partial class MainWindow : Window
             _lastSnapshot = snap;
             bool vpnConnected = snap.VpnRoutingReady;
             UpdateHomeDashboard(snap, vpnConnected);
-            UpdateAppsVpnState(vpnConnected);
+            UpdateAppsVpnState(snap);
 
             _allFlowRows.Clear();
             _allFlowRows.AddRange(
                 FlowPresentationHelper.SelectUserFlows(snap.Flows).Select(f => new ConnectionFlowRow(f)));
-            UpdateFlowFilterAppCombo();
-            RefreshFlowFilters();
+            RefreshConnectionsBoard(snap);
             LogBox.Text = string.Join(Environment.NewLine, snap.Vpn.RecentLog);
             _tray.Text = vpnConnected ? AppBranding.ProductName + " — подключён" : AppBranding.ProductName + " — отключён";
             await RefreshTempRealAppStatusAsync();
@@ -168,9 +179,18 @@ public partial class MainWindow : Window
 
     private void UpdateHomePage(ServiceSnapshot snap, bool vpnConnected)
     {
-        HomeVpnStatusText.Text = vpnConnected ? "Подключён" : "Отключён";
-        HomeVpnStatusDot.Fill = new SolidColorBrush(vpnConnected ? Color.FromRgb(0x05, 0x96, 0x69) : Color.FromRgb(0x9C, 0xA3, 0xAF));
-        HomeVpnSubtitle.Text = vpnConnected ? (snap.TransparentRedirectActive ? "Маршрутизация приложений активна" : "Маршрутизация приложений выключена") : "Приложения используют обычное подключение";
+        bool connecting = !vpnConnected && snap.Vpn.Running;
+        HomeVpnStatusText.Text = vpnConnected
+            ? "VPN Route работает"
+            : connecting ? "Подключение…" : "VPN Route выключен";
+        HomeVpnStatusDot.Fill = new SolidColorBrush(vpnConnected
+            ? Color.FromRgb(0x05, 0x96, 0x69)
+            : connecting ? Color.FromRgb(0xF5, 0x9E, 0x0B) : Color.FromRgb(0x9C, 0xA3, 0xAF));
+        HomeVpnSubtitle.Text = vpnConnected
+            ? $"Маршрутизация активна · {snap.VpnAdapter?.Name ?? "VPN"} · proxy {(snap.ProxyPort?.ToString() ?? "—")}"
+            : connecting
+                ? "OpenVPN запускается, ожидаем готовность маршрутизации…"
+                : "Приложения используют обычное подключение";
         HomeProfileText.Text = string.IsNullOrWhiteSpace(ProfileBox.Text) ? "—" : System.IO.Path.GetFileNameWithoutExtension(ProfileBox.Text);
         HomeDirectAdapterText.Text = snap.DirectAdapter?.Name ?? "—";
         HomeVpnAdapterText.Text = vpnConnected ? snap.VpnAdapter?.Name ?? "—" : "—";
@@ -192,16 +212,24 @@ public partial class MainWindow : Window
         HomeRoutingActiveCountText.Text = _appRules.Count(row =>
             recentUserFlows.Any(flow => ApplicationRulesHelper.PathsEqual(row.ExePath, flow.ProcessPath))).ToString();
         HomeRoutingDirectCountText.Text = _appRules.Count(r => r.Mode == RouteMode.Direct).ToString();
-        HomeRoutingStatusText.Text = snap.TransparentRedirectActive
-            ? "Активна"
-            : vpnConnected ? "Ожидает" : "Не активна";
+        HomeRoutingStatusText.Text = vpnConnected
+            ? (snap.TransparentRedirectActive ? "Маршрутизация активна" : "Подключено (ожидание перенаправления)")
+            : "Не активна";
         HomeActiveAppsList.ItemsSource = _appRules.Take(8).ToList();
         HomeRecentFlowsGrid.ItemsSource = _allFlowRows.Take(10).ToList();
     }
 
-    private void UpdateAppsVpnState(bool vpnConnected)
+    private void UpdateAppsVpnState(ServiceSnapshot snap)
     {
-        foreach (ApplicationRuleRow row in _appRules) { row.VpnConnected = vpnConnected; }
+        bool vpnConnected = snap.VpnRoutingReady;
+        IEnumerable<FlowEvent> activeFlows = FlowPresentationHelper.SelectUserFlows(snap.Flows)
+            .Where(f => !FlowStatusHelper.IsTerminal(f.Status)
+                        || f.Status is FlowLifecycle.Connected or FlowLifecycle.Relaying);
+        foreach (ApplicationRuleRow row in _appRules)
+        {
+            row.VpnConnected = vpnConnected;
+            row.UpdateRuntimeTraffic(activeFlows);
+        }
     }
 
     private void RefreshAppsFilter()
@@ -259,97 +287,300 @@ public partial class MainWindow : Window
         RefreshAppsFilter();
     }
 
-    private void UpdateFlowFilterAppCombo()
+    private void RefreshConnectionsBoard(ServiceSnapshot? snap = null)
     {
-        string? selected = FlowFilterAppCombo.SelectedItem as string;
-        List<string> apps = _allFlowRows
-            .Select(r => r.Application)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(a => a, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        FlowFilterAppCombo.Items.Clear();
-        FlowFilterAppCombo.Items.Add("Все приложения");
-        foreach (string app in apps)
+        snap ??= _lastSnapshot;
+        if (snap is null)
         {
-            FlowFilterAppCombo.Items.Add(app);
+            return;
         }
 
-        if (!string.IsNullOrWhiteSpace(selected) && FlowFilterAppCombo.Items.Contains(selected))
+        ConnectionsBoardProjection board = ConnectionUxProjection.Build(
+            snap.Flows,
+            snap.VpnRoutingReady,
+            GetConnectionRouteFilterKind(),
+            FlowSearchBox.Text);
+
+        ConnectionsRoutingStatusText.Text = board.RoutingStatusLine;
+        ConnectionsSummaryText.Text = board.Summary.ApplicationsLine;
+        ConnectionsDisconnectedPanel.Visibility = board.ShowDisconnectedEmptyState ? Visibility.Visible : Visibility.Collapsed;
+        ConnectionsNoTrafficPanel.Visibility = board.ShowNoTrafficEmptyState ? Visibility.Visible : Visibility.Collapsed;
+        ConnectionsListScroll.Visibility = board.VpnRoutingReady ? Visibility.Visible : Visibility.Collapsed;
+
+        double scrollOffset = ConnectionsListScroll.VerticalOffset;
+
+        _connectionGroups.Clear();
+        _connectionRecentGroups.Clear();
+        if (!board.VpnRoutingReady)
         {
-            FlowFilterAppCombo.SelectedItem = selected;
+            _selectedConnectionGroupKey = null;
+            _selectedConnectionEndpointKey = null;
+            SetConnectionDetailsPanelVisible(false);
+            return;
         }
-        else if (FlowFilterAppCombo.SelectedIndex < 0)
+
+        foreach (ConnectionAppGroupProjection group in board.ActiveGroups)
         {
-            FlowFilterAppCombo.SelectedIndex = 0;
+            ConnectionGroupViewModel vm = CreateConnectionGroupVm(group);
+            _connectionGroups.Add(vm);
+        }
+
+        foreach (ConnectionAppGroupProjection group in board.RecentOnlyGroups)
+        {
+            ConnectionGroupViewModel vm = CreateConnectionGroupVm(group);
+            _connectionRecentGroups.Add(vm);
+        }
+
+        ConnectionsListScroll.ScrollToVerticalOffset(scrollOffset);
+        RestoreConnectionSelection();
+    }
+
+    private void UpdateFlowSearchPlaceholder()
+    {
+        FlowSearchPlaceholder.Visibility = string.IsNullOrWhiteSpace(FlowSearchBox.Text)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void SetConnectionDetailsPanelVisible(bool visible)
+    {
+        ConnectionDetailsPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        ConnectionsDetailGapColumn.Width = visible ? new GridLength(12) : new GridLength(0);
+        ConnectionsDetailColumn.Width = visible ? new GridLength(0.33, GridUnitType.Star) : new GridLength(0);
+    }
+
+    private void RestoreConnectionSelection()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedConnectionGroupKey))
+        {
+            return;
+        }
+
+        ConnectionGroupViewModel? groupVm = _connectionGroups.FirstOrDefault(g =>
+                string.Equals(g.Projection.GroupKey, _selectedConnectionGroupKey, StringComparison.OrdinalIgnoreCase))
+            ?? _connectionRecentGroups.FirstOrDefault(g =>
+                string.Equals(g.Projection.GroupKey, _selectedConnectionGroupKey, StringComparison.OrdinalIgnoreCase));
+
+        if (groupVm is null)
+        {
+            _selectedConnectionGroupKey = null;
+            _selectedConnectionEndpointKey = null;
+            SetConnectionDetailsPanelVisible(false);
+            return;
+        }
+
+        if (ConnectionGroupsList.Items.Contains(groupVm))
+        {
+            ConnectionGroupsList.SelectedItem = groupVm;
+        }
+        else if (ConnectionRecentGroupsList.Items.Contains(groupVm))
+        {
+            ConnectionRecentGroupsList.SelectedItem = groupVm;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_selectedConnectionEndpointKey))
+        {
+            ConnectionEndpointAggregateProjection? aggregate = groupVm.Projection.ActiveEndpointAggregates
+                .FirstOrDefault(a => string.Equals(a.AggregateKey, _selectedConnectionEndpointKey, StringComparison.Ordinal));
+            if (aggregate is not null)
+            {
+                ShowConnectionDetails(groupVm.Projection, aggregate);
+            }
+            else
+            {
+                ShowConnectionDetails(groupVm.Projection, null);
+            }
+        }
+        else
+        {
+            ShowConnectionDetails(groupVm.Projection, null);
         }
     }
 
-    private void RefreshFlowFilters()
+    private ConnectionGroupViewModel CreateConnectionGroupVm(ConnectionAppGroupProjection group)
     {
-        IEnumerable<ConnectionFlowRow> query = _allFlowRows;
+        bool expanded = _expandedConnectionGroups.Contains(group.GroupKey);
+        ConnectionGroupViewModel vm = new(group, expanded);
+        vm.PropertyChanged += OnConnectionGroupExpandedChanged;
+        return vm;
+    }
+
+    private void OnConnectionGroupExpandedChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(ConnectionGroupViewModel.IsExpanded) || sender is not ConnectionGroupViewModel vm)
+        {
+            return;
+        }
+
+        if (vm.IsExpanded)
+        {
+            _expandedConnectionGroups.Add(vm.Projection.GroupKey);
+        }
+        else
+        {
+            _expandedConnectionGroups.Remove(vm.Projection.GroupKey);
+        }
+    }
+
+    private ConnectionRouteFilterKind GetConnectionRouteFilterKind()
+    {
+        if (FlowFilterErrors.IsChecked == true)
+        {
+            return ConnectionRouteFilterKind.Errors;
+        }
 
         if (FlowFilterVpn.IsChecked == true)
         {
-            query = query.Where(r => r.Route == "VPN");
-        }
-        else if (FlowFilterDirect.IsChecked == true)
-        {
-            query = query.Where(r => r.Route == "Напрямую");
+            return ConnectionRouteFilterKind.Vpn;
         }
 
-        if (FlowFilterErrors.IsChecked == true)
+        if (FlowFilterDirect.IsChecked == true)
         {
-            query = query.Where(r => FlowStatusHelper.IsError(r.State) || FlowStatusHelper.IsCancelled(r.State));
+            return ConnectionRouteFilterKind.Direct;
         }
 
-        string? appFilter = FlowFilterAppCombo.SelectedItem as string;
-        if (!string.IsNullOrWhiteSpace(appFilter)
-            && !string.Equals(appFilter, "Все приложения", StringComparison.OrdinalIgnoreCase))
+        if (FlowFilterMixed.IsChecked == true)
         {
-            query = query.Where(r => string.Equals(r.Application, appFilter, StringComparison.OrdinalIgnoreCase));
+            return ConnectionRouteFilterKind.Mixed;
         }
 
-        string search = FlowSearchBox.Text.Trim();
-        if (!string.IsNullOrWhiteSpace(search))
-        {
-            query = query.Where(r =>
-                r.Application.Contains(search, StringComparison.OrdinalIgnoreCase)
-                || r.Destination.Contains(search, StringComparison.OrdinalIgnoreCase)
-                || r.State.Contains(search, StringComparison.OrdinalIgnoreCase));
-        }
-
-        FlowsGrid.ItemsSource = query.ToList();
+        return ConnectionRouteFilterKind.All;
     }
 
     private void OnFlowFilterChanged(object sender, RoutedEventArgs e)
     {
         if (sender is ToggleButton clicked && clicked.IsChecked == true)
         {
-            if (clicked == FlowFilterAll || clicked == FlowFilterVpn || clicked == FlowFilterDirect)
+            if (clicked == FlowFilterAll || clicked == FlowFilterVpn || clicked == FlowFilterDirect || clicked == FlowFilterMixed)
             {
-                if (clicked != FlowFilterAll)
-                {
-                    FlowFilterAll.IsChecked = false;
-                }
-
-                if (clicked != FlowFilterVpn)
-                {
-                    FlowFilterVpn.IsChecked = false;
-                }
-
-                if (clicked != FlowFilterDirect)
-                {
-                    FlowFilterDirect.IsChecked = false;
-                }
+                if (clicked != FlowFilterAll) { FlowFilterAll.IsChecked = false; }
+                if (clicked != FlowFilterVpn) { FlowFilterVpn.IsChecked = false; }
+                if (clicked != FlowFilterDirect) { FlowFilterDirect.IsChecked = false; }
+                if (clicked != FlowFilterMixed) { FlowFilterMixed.IsChecked = false; }
+                FlowFilterErrors.IsChecked = false;
+            }
+            else if (clicked == FlowFilterErrors)
+            {
+                FlowFilterAll.IsChecked = false;
+                FlowFilterVpn.IsChecked = false;
+                FlowFilterDirect.IsChecked = false;
+                FlowFilterMixed.IsChecked = false;
             }
         }
-        else if (FlowFilterAll.IsChecked != true && FlowFilterVpn.IsChecked != true && FlowFilterDirect.IsChecked != true)
+        else if (FlowFilterAll.IsChecked != true
+                 && FlowFilterVpn.IsChecked != true
+                 && FlowFilterDirect.IsChecked != true
+                 && FlowFilterMixed.IsChecked != true
+                 && FlowFilterErrors.IsChecked != true)
         {
             FlowFilterAll.IsChecked = true;
         }
 
-        RefreshFlowFilters();
+        RefreshConnectionsBoard();
+    }
+
+    private void OnConnectionGroupSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ListView list)
+        {
+            return;
+        }
+
+        if (list.SelectedItem is not ConnectionGroupViewModel group)
+        {
+            if (ReferenceEquals(sender, ConnectionGroupsList) || ReferenceEquals(sender, ConnectionRecentGroupsList))
+            {
+                _selectedConnectionGroupKey = null;
+                _selectedConnectionEndpointKey = null;
+                SetConnectionDetailsPanelVisible(false);
+            }
+
+            return;
+        }
+
+        if (ReferenceEquals(sender, ConnectionGroupsList) && ConnectionRecentGroupsList.SelectedItem is not null)
+        {
+            ConnectionRecentGroupsList.SelectedItem = null;
+        }
+        else if (ReferenceEquals(sender, ConnectionRecentGroupsList) && ConnectionGroupsList.SelectedItem is not null)
+        {
+            ConnectionGroupsList.SelectedItem = null;
+        }
+
+        _selectedConnectionGroupKey = group.Projection.GroupKey;
+        _selectedConnectionEndpointKey = null;
+        SetConnectionDetailsPanelVisible(true);
+        ShowConnectionDetails(group.Projection, null);
+    }
+
+    private void OnConnectionEndpointSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ListView list
+            || list.DataContext is not ConnectionGroupViewModel groupVm
+            || list.SelectedItem is not ConnectionEndpointAggregateProjection aggregate)
+        {
+            return;
+        }
+
+        _selectedConnectionGroupKey = groupVm.Projection.GroupKey;
+        _selectedConnectionEndpointKey = aggregate.AggregateKey;
+        if (ConnectionGroupsList.SelectedItem != groupVm)
+        {
+            ConnectionGroupsList.SelectedItem = groupVm;
+        }
+
+        SetConnectionDetailsPanelVisible(true);
+        ShowConnectionDetails(groupVm.Projection, aggregate);
+    }
+
+    private void ShowConnectionDetails(ConnectionAppGroupProjection p, ConnectionEndpointAggregateProjection? aggregate)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Приложение: " + p.ApplicationName);
+        sb.AppendLine("Путь: " + p.ProcessPath);
+        sb.AppendLine("Маршрут: " + p.RouteSummaryLabel + (string.IsNullOrWhiteSpace(p.MixedBreakdown) ? "" : " (" + p.MixedBreakdown + ")"));
+        sb.AppendLine("Активных соединений: " + p.ActiveConnectionCount);
+        sb.AppendLine("Состояние: " + p.StateSummary);
+        if (p.FirstActivityUtc is not null)
+        {
+            sb.AppendLine("Первое событие: " + p.FirstActivityUtc.Value.ToLocalTime());
+        }
+
+        if (p.LastActivityUtc is not null)
+        {
+            sb.AppendLine("Последнее событие: " + p.LastActivityUtc.Value.ToLocalTime());
+        }
+
+        ConnectionFlowProjection? sample = aggregate?.SampleFlow
+            ?? p.ActiveFlows.FirstOrDefault()
+            ?? p.RecentFlows.FirstOrDefault();
+
+        if (aggregate is not null)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Агрегированная строка");
+            sb.AppendLine("Удалённый адрес: " + aggregate.RemoteEndpoint);
+            sb.AppendLine("Количество: " + aggregate.Count);
+            sb.AppendLine("Маршрут: " + aggregate.RouteLabel);
+            sb.AppendLine("Состояние: " + aggregate.DisplayStateLabel);
+        }
+
+        if (sample is not null)
+        {
+            sb.AppendLine();
+            sb.AppendLine(aggregate is null ? "Пример соединения" : "Пример из группы");
+            sb.AppendLine("Удалённый: " + sample.RemoteEndpoint);
+            sb.AppendLine("PID: " + sample.Pid);
+            sb.AppendLine("Маршрут: " + sample.RouteLabel);
+            sb.AppendLine("Состояние: " + sample.DisplayStateLabel + " (" + sample.RawStatus + ")");
+            sb.AppendLine("Proxy: redirect=" + sample.WfpRedirect + " accepted=" + sample.ProxyAccepted);
+            if (!string.IsNullOrWhiteSpace(sample.LocalEndpoint))
+            {
+                sb.AppendLine("Локальный: " + sample.LocalEndpoint);
+            }
+        }
+
+        ConnectionDetailsText.Text = sb.ToString().TrimEnd();
     }
 
     private void OnNavigateApps(object sender, RoutedEventArgs e) => MainTabs.SelectedIndex = 1;

@@ -160,6 +160,22 @@ public static class ApplicationRulesHelper
         return Path.GetFileNameWithoutExtension(fileName);
     }
 
+    /// <summary>Unified display name for flows (Home, Connections). Does not affect path matching.</summary>
+    public static string ResolveFlowApplicationDisplayName(FlowEvent flow)
+    {
+        if (!string.IsNullOrWhiteSpace(flow.RuleName))
+        {
+            return flow.RuleName.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(flow.ProcessPath))
+        {
+            return ResolveFriendlyAppName(flow.ProcessPath);
+        }
+
+        return "—";
+    }
+
     public static ApplicationRuleAddResult TryAddApplicationRule(AppConfiguration config, string exePath, RouteMode defaultMode = RouteMode.Vpn)
     {
         if (string.IsNullOrWhiteSpace(exePath))

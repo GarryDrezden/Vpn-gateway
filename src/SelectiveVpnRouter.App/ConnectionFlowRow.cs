@@ -17,7 +17,8 @@ public sealed class ConnectionFlowRow
             FlowRoute.Blocked => "Блок",
             _ => "-",
         };
-        State = flow.Status;
+        State = ConnectionUxProjection.FormatDisplayState(
+            ConnectionUxProjection.ClassifyDisplayState(flow.Status));
         Time = flow.UpdatedAt.ToLocalTime().ToString("HH:mm:ss");
         ProcessPath = flow.ProcessPath;
         FlowId = flow.FlowId;
@@ -31,10 +32,6 @@ public sealed class ConnectionFlowRow
     public string ProcessPath { get; }
     public Guid FlowId { get; }
 
-    private static string ResolveApplicationName(FlowEvent flow)
-    {
-        if (!string.IsNullOrWhiteSpace(flow.RuleName)) return flow.RuleName;
-        if (!string.IsNullOrWhiteSpace(flow.ProcessPath)) return Path.GetFileNameWithoutExtension(flow.ProcessPath);
-        return "-";
-    }
+    private static string ResolveApplicationName(FlowEvent flow) =>
+        ApplicationRulesHelper.ResolveFlowApplicationDisplayName(flow);
 }

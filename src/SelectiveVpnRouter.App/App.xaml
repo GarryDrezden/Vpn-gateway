@@ -31,14 +31,24 @@
       <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
     </Style>
 
+    <Style x:Key="AccentFocusVisual">
+      <Setter Property="Control.Template">
+        <Setter.Value>
+          <ControlTemplate>
+            <Rectangle Margin="2" SnapsToDevicePixels="True" Stroke="{StaticResource BrandPrimaryBrush}" StrokeThickness="1" RadiusX="4" RadiusY="4"/>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style TargetType="Button">
       <Setter Property="Margin" Value="0"/>
       <Setter Property="Padding" Value="12,8"/>
       <Setter Property="MinHeight" Value="36"/>
       <Setter Property="FontSize" Value="13"/>
       <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisual}"/>
     </Style>
-    <Style x:Key="PrimaryButton" TargetType="Button">
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Background" Value="{StaticResource BrandPrimaryBrush}"/>
       <Setter Property="Foreground" Value="White"/>
       <Setter Property="BorderBrush" Value="{StaticResource BrandPrimaryDarkBrush}"/>
@@ -47,28 +57,63 @@
       <Setter Property="Padding" Value="18,10"/>
       <Setter Property="MinHeight" Value="40"/>
     </Style>
-    <Style x:Key="SecondaryButton" TargetType="Button">
+    <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Background" Value="#FFFFFF"/>
       <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
       <Setter Property="BorderBrush" Value="#D1D5DB"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Padding" Value="14,8"/>
     </Style>
-    <Style x:Key="DangerButton" TargetType="Button">
+    <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Background" Value="#FEE2E2"/>
       <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
       <Setter Property="BorderBrush" Value="#FECACA"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Padding" Value="14,8"/>
     </Style>
-    <Style x:Key="GhostButton" TargetType="Button">
+    <Style x:Key="GhostButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Foreground" Value="{StaticResource BrandPrimaryDarkBrush}"/>
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="Padding" Value="10,6"/>
       <Setter Property="MinHeight" Value="32"/>
     </Style>
-    <Style x:Key="RouteToggleButton" TargetType="ToggleButton">
+    <Style x:Key="RouteBadgeText" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="ConnectionListViewItemStyle" TargetType="ListViewItem">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="Margin" Value="0,0,0,8"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListViewItem">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="1"
+                    Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}"/>
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#F9FAFB"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="ToggleButton">
+      <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisual}"/>
+    </Style>
+    <Style x:Key="RouteToggleButton" TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
       <Setter Property="Padding" Value="12,6"/>
       <Setter Property="MinHeight" Value="32"/>
       <Setter Property="MinWidth" Value="88"/>
@@ -77,6 +122,7 @@
       <Setter Property="Background" Value="#FFFFFF"/>
       <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
       <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisual}"/>
       <Style.Triggers>
         <Trigger Property="IsChecked" Value="True">
           <Setter Property="Background" Value="#EFF6FF"/>
@@ -105,6 +151,7 @@
       <Setter Property="MinHeight" Value="36"/>
       <Setter Property="BorderBrush" Value="#D1D5DB"/>
       <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FocusVisualStyle" Value="{StaticResource AccentFocusVisual}"/>
     </Style>
     <Style TargetType="ComboBox">
       <Setter Property="Padding" Value="8,6"/>
@@ -157,6 +204,7 @@
     <Style TargetType="Expander">
       <Setter Property="Margin" Value="0,8,0,0"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     </Style>
   </Application.Resources>
 </Application>
