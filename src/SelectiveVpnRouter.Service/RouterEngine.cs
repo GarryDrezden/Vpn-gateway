@@ -60,13 +60,26 @@ public sealed partial class RouterEngine : IAsyncDisposable
     {
         OpenVpnController? vpn = _vpn;
         TransparentTcpProxy? proxy = _proxy;
+        WfpSession? wfp = _wfp;
+        OpenVpnLiveStatus vpnLive = vpn?.Live() ?? new OpenVpnLiveStatus();
+        bool hasOwnedRoutes = _owned.Count > 0;
+        bool wfpOpen = wfp?.SessionOpen == true;
+        bool routingReady = VpnRoutingReadiness.IsRoutingReady(
+            vpnLive.Connected,
+            vpnLive.Running,
+            _vpnAdapter is not null,
+            proxy is not null,
+            hasOwnedRoutes,
+            wfpOpen);
         return new ServiceSnapshot
         {
             RoutingPaused = _paused,
             DriverLoaded = _driver?.IsLoaded == true,
-            TransparentRedirectActive = _driver?.IsLoaded == true && !_paused && vpn?.Connected == true
+            VpnRoutingReady = routingReady,
+            ProxyPort = proxy?.Port,
+            TransparentRedirectActive = _driver?.IsLoaded == true && !_paused && routingReady
                 && _driver.TryGetStatus(out CalloutArmStatus arm, out _) && arm.Enabled,
-            Vpn = vpn?.Live() ?? new OpenVpnLiveStatus(),
+            Vpn = vpnLive,
             VpnAdapter = ToLive(_vpnAdapter),
             VpnAdapterSelection = ToSelectionDiagnostics(_vpnAdapterSelection),
             DirectAdapter = ToLive(_directAdapter),
@@ -657,7 +670,7 @@ public static class DiagnosticCenter
 
     private static async Task<DiagnosticResult> Connect(RouterEngine engine, CancellationToken ct)
     {
-        if (engine.Snapshot().Vpn.Connected)
+        if (engine.Snapshot().VpnRoutingReady)
         {
             return Pass("connect-vpn", "Already connected.");
         }

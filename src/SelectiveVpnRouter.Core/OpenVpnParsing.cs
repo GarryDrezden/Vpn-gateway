@@ -2,8 +2,33 @@ namespace SelectiveVpnRouter.Core;
 
 public static class OpenVpnStateParser
 {
-    public static bool IsConnected(string logLine)
-        => logLine.Contains("Initialization Sequence Completed", StringComparison.OrdinalIgnoreCase);
+    public const string InitializationSequenceCompleted = "Initialization Sequence Completed";
+    public const string InitializationSequenceCompletedWithErrors = "Initialization Sequence Completed With Errors";
+
+    /// <summary>
+    /// True only for a successful OpenVPN init completion line (not "With Errors").
+    /// Accepts optional timestamp/text prefix; rejects partial or trailing extra tokens.
+    /// </summary>
+    public static bool IsConnected(string? logLine)
+    {
+        if (string.IsNullOrWhiteSpace(logLine))
+        {
+            return false;
+        }
+
+        string trimmed = logLine.Trim();
+        if (trimmed.Contains(InitializationSequenceCompletedWithErrors, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!trimmed.EndsWith(InitializationSequenceCompleted, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
 
     public static bool IsAuthPrompt(string logLine)
         => logLine.Contains("Enter Auth Username", StringComparison.OrdinalIgnoreCase)

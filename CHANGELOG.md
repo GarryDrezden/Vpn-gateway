@@ -1,5 +1,13 @@
 # Changelog
 
+## Milestone — Connection lifecycle stability (`vpn-lifecycle-stability-pass-v1`)
+
+- OpenVPN `IsConnected`: reject `Initialization Sequence Completed With Errors`; require successful completion line semantics.
+- `ServiceSnapshot.VpnRoutingReady` for full pipeline readiness (UI + offline runners).
+- Diagnostics: `vpn-resource-health`, `vpn-lifecycle-cleanup-check`, `vpn-lifecycle-reconnect-stress` (post-reconnect routing smoke), `vpn-connection-routing-smoke` (delegates to `transparent-routing`).
+- Offline: `test-vpn-lifecycle-preflight.ps1`, `run-vpn-lifecycle-regression.ps1`; IPC service PID watch baseline fixes.
+- Docs: [docs/vpn-lifecycle-stability.md](docs/vpn-lifecycle-stability.md).
+
 ## Milestone — Unicode ALE_APP_ID routing (`unicode-appid-routing-pass-v1`)
 
 - **Root cause:** runtime ALE_APP_ID is byte-exact UTF-16LE; FwpmGetAppIdFromFileName0 can return filesystem casing that differs (e.g. Cyrillic Т vs т).

@@ -137,7 +137,7 @@ public partial class MainWindow : Window
 
             SetServiceUnavailable(false);
             _lastSnapshot = snap;
-            bool vpnConnected = snap.Vpn.Connected;
+            bool vpnConnected = snap.VpnRoutingReady;
             UpdateHomeDashboard(snap, vpnConnected);
             UpdateAppsVpnState(vpnConnected);
 
@@ -1080,7 +1080,7 @@ public partial class MainWindow : Window
         try
         {
             ServiceSnapshot? snap = await _client.SendOkAsync<ServiceSnapshot>(IpcMethods.GetStatus, null, _cts.Token);
-            return snap?.Vpn.Connected == true;
+            return snap?.VpnRoutingReady == true;
         }
         catch (Exception)
         {

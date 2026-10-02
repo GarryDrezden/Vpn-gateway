@@ -53,7 +53,7 @@ try {
     $statusResp = Invoke-SvrIpcGetStatusWithRetry -MaxAttempts 24 -PollIntervalMs 250 -TimeoutMs 15000
 
     $snap = $statusResp.PayloadJson | ConvertFrom-Json
-    if (-not $snap.Vpn.Connected) {
+    if (-not $snap.VpnRoutingReady) {
         Write-RoutingFastDetail "routing-fast: SKIP (VPN disconnected)"
         Write-RoutingFastLine -Outcome SKIP -Reason "VPN disconnected"
         exit 2

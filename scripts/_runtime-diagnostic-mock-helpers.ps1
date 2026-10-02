@@ -36,14 +36,16 @@ function New-SvrSparseIpcEnvelope {
 function New-SvrMockGetStatusPayload {
     param(
         [bool]$VpnConnected = $true,
+        [bool]$VpnRoutingReady = $true,
         [bool]$DriverLoaded = $true,
         [bool]$WfpPolicyHealthy = $true
     )
 
     $snap = @{
-        Vpn          = @{ Connected = $VpnConnected }
-        DriverLoaded = $DriverLoaded
-        WfpPolicy    = @{ PolicyHealthy = $WfpPolicyHealthy }
+        Vpn              = @{ Connected = $VpnConnected }
+        VpnRoutingReady  = $VpnRoutingReady
+        DriverLoaded     = $DriverLoaded
+        WfpPolicy        = @{ PolicyHealthy = $WfpPolicyHealthy }
     }
     return ($snap | ConvertTo-Json -Compress)
 }

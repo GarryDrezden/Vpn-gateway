@@ -445,6 +445,7 @@ public class OpenVpnParserTests
     public void Parses_connected_and_version()
     {
         Assert.True(OpenVpnStateParser.IsConnected("Initialization Sequence Completed"));
+        Assert.False(OpenVpnStateParser.IsConnected("Initialization Sequence Completed With Errors"));
         Assert.Equal("OpenVPN 2.6.6 [git:foo]", OpenVpnStateParser.TryParseVersionLine("banner\nOpenVPN 2.6.6 [git:foo]\n"));
         Assert.Equal("[REDACTED]", LogRedactor.Redact("Enter Auth Password: secret"));
     }

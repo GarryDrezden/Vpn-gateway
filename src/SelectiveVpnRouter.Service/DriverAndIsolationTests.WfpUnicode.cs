@@ -27,7 +27,7 @@ internal static partial class DriverAndIsolationTests
                 "Callout-draiver ne zagruzhen."));
         }
 
-        if (!engine.Snapshot().Vpn.Connected || engine.ProxyPort is null)
+        if (!engine.Snapshot().VpnRoutingReady || engine.ProxyPort is null)
         {
             return Fail("wfp-probe-unicode-redirect", Bilingual(
                 "VPN not connected or proxy not running.",
@@ -95,7 +95,7 @@ internal static partial class DriverAndIsolationTests
             return Fail("wfp-probe-short-appid-ab", Bilingual("Probe.exe missing.", "Probe.exe ne naiden."));
         }
 
-        if (!engine.Snapshot().DriverLoaded || !engine.Snapshot().Vpn.Connected || engine.ProxyPort is null)
+        if (!engine.Snapshot().DriverLoaded || !engine.Snapshot().VpnRoutingReady || engine.ProxyPort is null)
         {
             return Fail("wfp-probe-short-appid-ab", Bilingual(
                 "Requires loaded driver, connected VPN, and proxy.",

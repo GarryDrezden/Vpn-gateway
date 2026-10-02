@@ -831,15 +831,52 @@ function Invoke-SvrReadExact {
     }
 }
 
+$script:SvrServiceProcessIdOverride = $null
+
 function Get-SvrServiceProcessId {
     param([string]$ServiceName = "SelectiveVpnRouter")
 
+    if ($null -ne $script:SvrServiceProcessIdOverride) {
+        return & $script:SvrServiceProcessIdOverride -ServiceName $ServiceName
+    }
+
     $svc = Get-CimInstance Win32_Service -Filter ("Name='" + $ServiceName + "'") -ErrorAction SilentlyContinue
-    if ($null -eq $svc -or -not $svc.ProcessId) {
+    if ($null -eq $svc) {
         return $null
     }
 
-    return [int]$svc.ProcessId
+    $processId = [int]$svc.ProcessId
+    if ($processId -le 0) {
+        return $null
+    }
+
+    return $processId
+}
+
+function Resolve-SvrServicePidBaselineForWatch {
+    param(
+        [string]$ServiceName = "SelectiveVpnRouter",
+        [int]$TimeoutMs = 5000,
+        [int]$PollIntervalMs = 200
+    )
+
+    if ($TimeoutMs -le 0) {
+        $TimeoutMs = 5000
+    }
+    if ($PollIntervalMs -le 0) {
+        $PollIntervalMs = 200
+    }
+
+    $deadline = [datetime]::UtcNow.AddMilliseconds($TimeoutMs)
+    while ([datetime]::UtcNow -lt $deadline) {
+        $processId = Get-SvrServiceProcessId -ServiceName $ServiceName
+        if ($null -ne $processId -and [int]$processId -gt 0) {
+            return [int]$processId
+        }
+        Start-Sleep -Milliseconds $PollIntervalMs
+    }
+
+    return $null
 }
 
 function Invoke-SvrIpcCore {
@@ -1098,15 +1135,22 @@ function Test-SvrIpcServiceWatchPoll {
         [Parameter(Mandatory = $true)][int]$BaselinePid
     )
 
-    $currentPid = Get-SvrServiceProcessId
-    if ($null -eq $currentPid) {
+    if ($BaselinePid -le 0) {
         return [pscustomobject]@{
             Abort   = $true
-            Message = "service stopped during IPC (baselinePid=$BaselinePid)"
+            Message = "Unable to determine service PID during diagnostic watch (invalid baselinePid=$BaselinePid)"
         }
     }
 
-    if ($currentPid -ne $BaselinePid) {
+    $currentPid = Get-SvrServiceProcessId
+    if ($null -eq $currentPid -or [int]$currentPid -le 0) {
+        return [pscustomobject]@{
+            Abort   = $true
+            Message = "service stopped during IPC (baselinePid=$BaselinePid currentPid=unknown)"
+        }
+    }
+
+    if ([int]$currentPid -ne $BaselinePid) {
         return [pscustomobject]@{
             Abort   = $true
             Message = "service restarted during IPC (baselinePid=$BaselinePid currentPid=$currentPid)"
@@ -1191,6 +1235,10 @@ function Invoke-SvrIpcWithServiceWatch {
         [int]$ServicePidPollMs = 1000,
         [string]$HelpersRoot = $PSScriptRoot
     )
+
+    if ($ServicePidBaseline -le 0) {
+        throw "Unable to determine service PID before diagnostic (baselinePid=$ServicePidBaseline)"
+    }
 
     if ($null -ne $script:SvrIpcWithServiceWatchOverride) {
         $overrideRaw = & $script:SvrIpcWithServiceWatchOverride -Method $Method -PayloadJson $PayloadJson -WallClockTimeoutMs $WallClockTimeoutMs -ServicePidBaseline $ServicePidBaseline -ServicePidPollMs $ServicePidPollMs -HelpersRoot $HelpersRoot

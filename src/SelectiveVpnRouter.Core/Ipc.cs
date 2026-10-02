@@ -30,6 +30,9 @@ public sealed record ServiceSnapshot
     public bool RoutingPaused { get; init; }
     public bool DriverLoaded { get; init; }
     public bool TransparentRedirectActive { get; init; }
+    /// <summary>Full routing pipeline ready (OpenVPN + adapter + owned route + proxy + WFP session).</summary>
+    public bool VpnRoutingReady { get; init; }
+    public int? ProxyPort { get; init; }
     public OpenVpnLiveStatus Vpn { get; init; } = new();
     public AdapterLiveStatus? VpnAdapter { get; init; }
     public VpnAdapterSelectionDiagnostics? VpnAdapterSelection { get; init; }

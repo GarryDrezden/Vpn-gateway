@@ -1,7 +1,9 @@
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_update-helpers.ps1")
 $serviceProcId = Get-SvrServiceProcessId
-if ($null -eq $serviceProcId) { Write-Host "SKIP live IPC watch (service down)"; exit 0 }
+if ($null -eq $serviceProcId -or [int]$serviceProcId -le 0) { Write-Host "SKIP live IPC watch (service down)"; exit 0 }
+$livePoll = Test-SvrIpcServiceWatchPoll -BaselinePid $serviceProcId
+if ($livePoll.Abort) { throw "False service watch at baseline: $($livePoll.Message)" }
 $raw = $null
 $ps = [powershell]::Create()
 try {

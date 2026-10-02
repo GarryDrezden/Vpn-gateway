@@ -52,6 +52,16 @@ Offline regression (after VPN Connected):
 .\scripts\run-wfp-appid-regression.ps1
 ```
 
+### Milestone 5 — `vpn-lifecycle-stability-pass-v1`
+
+Connect/disconnect/reconnect cleanup, routing after second reconnect, clean disconnected health.
+
+- `VpnRoutingReady` gates UI and offline runners (full pipeline, not log line alone).
+- OpenVPN parser rejects `Initialization Sequence Completed With Errors`.
+- Offline: `test-vpn-lifecycle-preflight.ps1`, `run-vpn-lifecycle-regression.ps1` (initial + post-reconnect routing smoke, final cleanup).
+
+Technical note: [docs/vpn-lifecycle-stability.md](docs/vpn-lifecycle-stability.md)
+
 ### Verified now (TCP IPv4)
 
 - Per-process connect-redirect for selected `.exe` processes (ASCII and Unicode paths)

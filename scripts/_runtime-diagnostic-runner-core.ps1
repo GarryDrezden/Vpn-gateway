@@ -54,7 +54,7 @@ try {
 
     $statusResp = $ipcReadyResult.StatusResponse
     $snap = $statusResp.PayloadJson | ConvertFrom-Json
-    $vpnConnected = [bool]$snap.Vpn.Connected
+    $vpnConnected = [bool]$snap.VpnRoutingReady
     $driverLoaded = [bool]$snap.DriverLoaded
     if ($null -ne $snap.WfpPolicy) {
         $wfpPolicyHealthy = [bool]$snap.WfpPolicy.PolicyHealthy
@@ -78,7 +78,7 @@ try {
             }
 
             $snap = $statusResp.PayloadJson | ConvertFrom-Json
-            $vpnConnected = [bool]$snap.Vpn.Connected
+            $vpnConnected = [bool]$snap.VpnRoutingReady
             $driverLoaded = [bool]$snap.DriverLoaded
             if ($null -ne $snap.WfpPolicy) {
                 $wfpPolicyHealthy = [bool]$snap.WfpPolicy.PolicyHealthy

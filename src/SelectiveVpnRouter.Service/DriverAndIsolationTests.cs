@@ -32,6 +32,10 @@ internal static partial class DriverAndIsolationTests
             "wfp-runtime-appid-blob" => await RunWfpRuntimeAppIdBlob(engine, ct).ConfigureAwait(false),
             "wfp-runtime-appid-normalization-matrix" => await RunWfpRuntimeAppIdNormalizationMatrix(engine, ct).ConfigureAwait(false),
             "wfp-telegram-appid-acceptance" => await RunWfpTelegramAppIdAcceptance(engine, ct).ConfigureAwait(false),
+            "vpn-resource-health" => RunVpnResourceHealth(engine),
+            "vpn-lifecycle-cleanup-check" => RunVpnLifecycleCleanupCheck(engine),
+            "vpn-lifecycle-reconnect-stress" => await RunVpnLifecycleReconnectStress(engine, confirm, ct).ConfigureAwait(false),
+            "vpn-connection-routing-smoke" => await RunVpnConnectionRoutingSmoke(engine, ct).ConfigureAwait(false),
             "driver-stop" => Sc("driver-stop", "stop", confirm),
             "driver-uninstall" => await Script("driver-uninstall", "uninstall-driver.ps1", confirm, ct).ConfigureAwait(false),
             "preferred-default" => PreferredRoutes.Evaluate(engine.VpnAdapter?.Ipv4Index),
@@ -257,7 +261,7 @@ internal static partial class DriverAndIsolationTests
                 directOk,
                 directViaProxy,
                 localsDiffer,
-                engine.Snapshot().Vpn.Connected));
+                engine.Snapshot().VpnRoutingReady));
 
             if (vpnThroughRedirect)
             {
@@ -266,7 +270,7 @@ internal static partial class DriverAndIsolationTests
                     "ИЗОЛЯЦИЯ ПО ПРОЦЕССАМ: PASS. " + detailRu));
             }
 
-            if (!engine.Snapshot().Vpn.Connected)
+            if (!engine.Snapshot().VpnRoutingReady)
             {
                 return Fail("transparent-routing", Bilingual(
                     "PER-PROCESS ISOLATION: FAIL (VPN not connected, cannot prove egress). " + detailEn,
