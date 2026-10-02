@@ -11,6 +11,8 @@ public static class ApplicationRulesHelper
         "tmp-parent-vpn",
         "tmp-child-direct",
         "tmp-v6",
+        MultiAppRoutingIsolation.TempRuleNameA,
+        MultiAppRoutingIsolation.TempRuleNameB,
     ];
 
     public static string NormalizeExePath(string exePath)
@@ -63,7 +65,7 @@ public static class ApplicationRulesHelper
             return false;
         }
 
-        return IsLikelyTempSessionPath(normalized) || IsProbeCopyInTemp(normalized);
+        return IsLikelyTempSessionPath(normalized) || IsProbeCopyInTemp(normalized) || IsMultiAppProbeExecutablePath(normalized);
     }
 
     public static bool IsLikelyTempSessionPath(string fullPath)
@@ -79,6 +81,10 @@ public static class ApplicationRulesHelper
             || fullPath.Contains(@"\svr-v6-", StringComparison.OrdinalIgnoreCase);
     }
 
+
+    public static bool IsMultiAppProbeExecutablePath(string target) =>
+        MultiAppRoutingProbePaths.IsUnderProbeRoot(target);
+
     public static bool IsProbeCopyInTemp(string fullPath)
     {
         if (!Path.GetFileName(fullPath).Equals(ProbeCopyHelper.ProbeExeName, StringComparison.OrdinalIgnoreCase))
@@ -89,6 +95,15 @@ public static class ApplicationRulesHelper
         string temp = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         return fullPath.StartsWith(temp, StringComparison.OrdinalIgnoreCase);
     }
+
+    public static IReadOnlyList<RoutingRule> WithoutDiagnosticApplicationRules(IEnumerable<RoutingRule> rules) =>
+        rules.Where(r => !IsDiagnosticApplicationRule(r)).ToList();
+
+    public static AppConfiguration WithoutDiagnosticApplicationRules(AppConfiguration config) =>
+        config with { Rules = WithoutDiagnosticApplicationRules(config.Rules).ToList() };
+
+    public static IReadOnlyList<RoutingRule> GetDiagnosticApplicationRules(IEnumerable<RoutingRule> rules) =>
+        rules.Where(IsDiagnosticApplicationRule).ToList();
 
     public static IReadOnlyList<RoutingRule> GetPermanentApplicationRules(AppConfiguration config) =>
         config.Rules.Where(IsPersistentUserApplicationRule).ToList();

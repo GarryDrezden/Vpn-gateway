@@ -153,6 +153,23 @@ public class ApplicationRulesHelperTests
     }
 
     [Fact]
+    public void WithoutDiagnosticApplicationRules_removes_tmp_iso_but_keeps_telegram()
+    {
+        var config = new AppConfiguration
+        {
+            Rules =
+            [
+                RoutingRule.Create(RuleType.Application, "tmp-iso-vpn", Path.Combine(Path.GetTempPath(), "svr-iso-dead", "vpn", ProbeCopyHelper.ProbeExeName), RouteMode.Vpn),
+                RoutingRule.Create(RuleType.Application, "Telegram Desktop", @"C:\Apps\Telegram\Telegram.exe", RouteMode.Vpn),
+            ],
+        };
+
+        IReadOnlyList<RoutingRule> kept = ApplicationRulesHelper.WithoutDiagnosticApplicationRules(config.Rules);
+        Assert.Single(kept);
+        Assert.Equal("Telegram Desktop", kept[0].Name);
+    }
+
+    [Fact]
     public void Regression_E_tmp_rule_does_not_suppress_persistent_rule()
     {
         string exe = Path.Combine(Path.GetTempPath(), "svr-iso-" + Guid.NewGuid().ToString("N"), "vpn", ProbeCopyHelper.ProbeExeName);
