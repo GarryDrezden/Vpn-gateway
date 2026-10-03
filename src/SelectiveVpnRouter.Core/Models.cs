@@ -63,6 +63,7 @@ public sealed record VpnProfileSettings
 public sealed record AppConfiguration
 {
     public VpnProfileSettings Vpn { get; init; } = new();
+    public WorkVpnSettings WorkVpn { get; init; } = new();
     public IReadOnlyList<RoutingRule> Rules { get; init; } = [];
     public UiSettings Ui { get; init; } = new();
 }

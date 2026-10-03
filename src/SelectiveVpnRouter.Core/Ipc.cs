@@ -34,6 +34,7 @@ public sealed record ServiceSnapshot
     public bool VpnRoutingReady { get; init; }
     public int? ProxyPort { get; init; }
     public OpenVpnLiveStatus Vpn { get; init; } = new();
+    public WorkVpnLiveStatus WorkVpn { get; init; } = new();
     public AdapterLiveStatus? VpnAdapter { get; init; }
     public VpnAdapterSelectionDiagnostics? VpnAdapterSelection { get; init; }
     public AdapterLiveStatus? DirectAdapter { get; init; }
@@ -56,6 +57,23 @@ public sealed record OpenVpnLiveStatus
     public int? Pid { get; init; }
     public DateTimeOffset? ConnectedSince { get; init; }
     public string? Gateway { get; init; }
+    public IReadOnlyList<string> RecentLog { get; init; } = [];
+}
+
+public sealed record WorkVpnLiveStatus
+{
+    public bool FeatureEnabled { get; init; }
+    public bool Configured { get; init; }
+    public bool WorkVpnReady { get; init; }
+    public WorkVpnSessionState State { get; init; } = WorkVpnSessionState.Disconnected;
+    public bool Connected { get; init; }
+    public bool WaitingForMfa { get; init; }
+    public string? ProfilePath { get; init; }
+    public string? AdapterName { get; init; }
+    public int? InterfaceIndex { get; init; }
+    public string? Address { get; init; }
+    public int? ProcessId { get; init; }
+    public string? LastError { get; init; }
     public IReadOnlyList<string> RecentLog { get; init; } = [];
 }
 
@@ -171,6 +189,8 @@ public static class IpcMethods
     public const string SetConfig = "SetConfig";
     public const string ConnectVpn = "ConnectVpn";
     public const string DisconnectVpn = "DisconnectVpn";
+    public const string ConnectWorkVpn = "ConnectWorkVpn";
+    public const string DisconnectWorkVpn = "DisconnectWorkVpn";
     public const string PauseRouting = "PauseRouting";
     public const string ResumeRouting = "ResumeRouting";
     public const string EmergencyRestore = "EmergencyRestore";
@@ -193,6 +213,15 @@ public static class VpnConnectBudget
         OpenVpnStartupMs + VpnAdapterReadinessMs + ConnectVpnSetupMs;
 }
 
+public static class WorkVpnConnectBudget
+{
+    public const int OpenVpnStartupMs = 45_000;
+    public const int MfaWaitMs = 300_000;
+    public const int AdapterReadinessMs = 20_000;
+
+    public const int TotalOperationMs = OpenVpnStartupMs + MfaWaitMs + AdapterReadinessMs;
+}
+
 public static class IpcTimeouts
 {
     public const int PipeConnectMs = 5_000;
@@ -205,7 +234,9 @@ public static class IpcTimeouts
         method switch
         {
             IpcMethods.ConnectVpn => ConnectVpnMs,
+            IpcMethods.ConnectWorkVpn => ShortOperationMs,
             IpcMethods.DisconnectVpn => LongOperationMs,
+            IpcMethods.DisconnectWorkVpn => LongOperationMs,
             IpcMethods.EmergencyRestore => LongOperationMs,
             IpcMethods.RunDiagnostic => LongOperationMs,
             IpcMethods.ExportDiagnostics => LongOperationMs,

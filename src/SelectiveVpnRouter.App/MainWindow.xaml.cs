@@ -44,11 +44,13 @@ public partial class MainWindow : Window
     private CancellationTokenSource _cts = new();
     private bool _exit;
     private bool _connectUiActive;
+    private bool _workConnectPollActive;
     private AppConfiguration _config = new();
 
     public MainWindow()
     {
         InitializeComponent();
+        ApplyWorkVpnFeatureVisibility();
         if (LayoutDebugOptions.Enabled)
         {
             LayoutDebugHelper.Attach(this, RootDock);
@@ -133,7 +135,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshAsync(bool force = false)
     {
-        if (_connectUiActive && !force)
+        if (_connectUiActive && !force && !_workConnectPollActive)
         {
             return;
         }
@@ -167,6 +169,18 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ApplyWorkVpnFeatureVisibility()
+    {
+        if (WorkVpnUiProjection.IsVisible)
+        {
+            return;
+        }
+
+        HomeWorkVpnCard.Visibility = Visibility.Collapsed;
+        WorkVpnSettingsCard.Visibility = Visibility.Collapsed;
+        SetupVpnCard.SetValue(Grid.ColumnSpanProperty, 3);
+    }
+
     private void SetServiceUnavailable(bool unavailable)
     {
         ServiceBanner.Visibility = unavailable ? Visibility.Visible : Visibility.Collapsed;
@@ -179,6 +193,7 @@ public partial class MainWindow : Window
 
     private void UpdateHomePage(ServiceSnapshot snap, bool vpnConnected)
     {
+        UpdateHomeWorkVpn(snap);
         bool connecting = !vpnConnected && snap.Vpn.Running;
         HomeVpnStatusText.Text = vpnConnected
             ? "VPN Route работает"
@@ -199,6 +214,48 @@ public partial class MainWindow : Window
         HomeDriverText.Text = snap.DriverLoaded ? "Загружен" : "Не загружен";
         ConnectVpnButton.Visibility = vpnConnected ? Visibility.Collapsed : Visibility.Visible;
         DisconnectVpnButton.Visibility = vpnConnected ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdateHomeWorkVpn(ServiceSnapshot snap)
+    {
+        if (!WorkVpnUiProjection.IsVisible)
+        {
+            return;
+        }
+
+        WorkVpnLiveStatus work = snap.WorkVpn;
+        bool ready = work.WorkVpnReady;
+        bool connecting = work.State is WorkVpnSessionState.Connecting
+            or WorkVpnSessionState.WaitingForMfa
+            or WorkVpnSessionState.WaitingForCredentials;
+        HomeWorkVpnStatusText.Text = ready
+            ? "Подключён"
+            : work.State == WorkVpnSessionState.WaitingForMfa || work.WaitingForMfa
+                ? "Ожидание MFA…"
+                : work.State == WorkVpnSessionState.WaitingForCredentials
+                    ? "Ожидание учётных данных…"
+                : connecting ? "Подключение…" : work.State == WorkVpnSessionState.Failed ? "Ошибка подключения" : "Отключён";
+        HomeWorkVpnStatusDot.Fill = new SolidColorBrush(ready
+            ? Color.FromRgb(0x05, 0x96, 0x69)
+            : work.WaitingForMfa || connecting
+                ? Color.FromRgb(0xF5, 0x9E, 0x0B)
+                : work.State == WorkVpnSessionState.Failed
+                    ? Color.FromRgb(0xDC, 0x26, 0x26)
+                    : Color.FromRgb(0x9C, 0xA3, 0xAF));
+        HomeWorkVpnSubtitle.Text = work.WaitingForMfa
+            ? "Ожидание подтверждения второго фактора…"
+            : work.State == WorkVpnSessionState.Failed && !string.IsNullOrWhiteSpace(work.LastError)
+                ? work.LastError
+            : connecting
+                ? "OpenVPN запускается, ожидаем ответ сервера…"
+                : "Корпоративный split-tunnel (server push routes)";
+        string profile = work.ProfilePath ?? WorkProfileBox.Text;
+        HomeWorkProfileText.Text = string.IsNullOrWhiteSpace(profile) ? "—" : System.IO.Path.GetFileNameWithoutExtension(profile);
+        HomeWorkAddressText.Text = work.Address ?? "—";
+        bool inFlight = connecting || work.State is WorkVpnSessionState.WaitingForMfa or WorkVpnSessionState.WaitingForCredentials;
+        ConnectWorkVpnButton.Visibility = ready || inFlight ? Visibility.Collapsed : Visibility.Visible;
+        DisconnectWorkVpnButton.Visibility = ready || inFlight ? Visibility.Visible : Visibility.Collapsed;
+        DisconnectWorkVpnButton.Content = inFlight && !ready ? "Отменить" : "Отключить";
     }
 
     private void UpdateHomeDashboard(ServiceSnapshot snap, bool vpnConnected)
@@ -685,6 +742,14 @@ public partial class MainWindow : Window
     {
         ExeBox.Text = cfg.Vpn.OpenVpnPath;
         ProfileBox.Text = cfg.Vpn.ProfilePath;
+        if (WorkVpnUiProjection.IsVisible)
+        {
+            WorkVpnSettings work = WorkVpnProfileDefaults.WithMigrationDefaults(cfg.WorkVpn);
+            WorkVpnEnabledBox.IsChecked = work.Enabled;
+            WorkProfileBox.Text = work.ProfilePath;
+            WorkUserBox.Text = work.Username ?? "";
+            WorkRememberUserBox.IsChecked = work.RememberUsername;
+        }
         DcoBox.IsChecked = cfg.Vpn.CompatibilityDisableDco;
         QuicBox.IsChecked = cfg.Vpn.BlockQuicForVpnApps;
         Ipv6Box.SelectedIndex = cfg.Vpn.Ipv6Policy switch
@@ -721,9 +786,19 @@ public partial class MainWindow : Window
         List<RoutingRule> diagnosticRules = _config.Rules
             .Where(ApplicationRulesHelper.IsDiagnosticApplicationRule)
             .ToList();
+        WorkVpnSettings work = WorkVpnUiProjection.IsVisible
+            ? new WorkVpnSettings
+            {
+                Enabled = WorkVpnEnabledBox.IsChecked == true,
+                ProfilePath = WorkProfileBox.Text.Trim(),
+                Username = string.IsNullOrWhiteSpace(WorkUserBox.Text) ? null : WorkUserBox.Text.Trim(),
+                RememberUsername = WorkRememberUserBox.IsChecked == true,
+            }
+            : _config.WorkVpn;
         return new AppConfiguration
         {
             Vpn = vpn,
+            WorkVpn = work,
             Rules = _appRules.Select(r => r.ToRule())
                 .Concat(_advancedRules.Select(r => r.ToRule()))
                 .Concat(diagnosticRules)
@@ -733,6 +808,10 @@ public partial class MainWindow : Window
     }
 
     private async void OnStart(object sender, RoutedEventArgs e) => await ConnectVpnAsync();
+
+    private async void OnStartWorkVpn(object sender, RoutedEventArgs e) => await ConnectWorkVpnAsync();
+
+    private async void OnStopWorkVpn(object sender, RoutedEventArgs e) => await Call(IpcMethods.DisconnectWorkVpn);
 
     private async void OnStop(object sender, RoutedEventArgs e) => await Call(IpcMethods.DisconnectVpn);
     private async void OnPause(object sender, RoutedEventArgs e) => await Call(IpcMethods.PauseRouting);
@@ -947,7 +1026,7 @@ public partial class MainWindow : Window
 
     private async Task RefreshTempRealAppStatusAsync(bool force = false)
     {
-        if (_connectUiActive && !force)
+        if (_connectUiActive && !force && !_workConnectPollActive)
         {
             return;
         }
@@ -1232,6 +1311,169 @@ public partial class MainWindow : Window
             ProfilePath = ProfileBox.Text.Trim(),
             DisableDco = DcoBox.IsChecked == true,
         };
+
+    private ConnectWorkVpnRequest? BuildConnectWorkVpnRequestFromUi(string password)
+    {
+        if (WorkVpnEnabledBox.IsChecked != true)
+        {
+            return null;
+        }
+
+        string? user = string.IsNullOrWhiteSpace(WorkUserBox.Text) ? null : WorkUserBox.Text.Trim();
+        if (user is null)
+        {
+            return null;
+        }
+
+        return new ConnectWorkVpnRequest
+        {
+            OpenVpnPath = ExeBox.Text.Trim(),
+            ProfilePath = WorkProfileBox.Text.Trim(),
+            Username = user,
+            Password = password,
+            DisableDco = DcoBox.IsChecked == true,
+        };
+    }
+
+    private async Task ConnectWorkVpnAsync()
+    {
+        if (!WorkVpnUiProjection.IsVisible)
+        {
+            return;
+        }
+
+        if (WorkVpnEnabledBox.IsChecked != true)
+        {
+            MessageBox.Show("Включите рабочий VPN в настройках.", AppBranding.ProductName);
+            return;
+        }
+
+        await SaveConfigAsync();
+        if (!PromptWorkCredentials(out string password))
+        {
+            return;
+        }
+
+        ConnectWorkVpnRequest? request = BuildConnectWorkVpnRequestFromUi(password);
+        if (request is null)
+        {
+            MessageBox.Show("Укажите имя пользователя для рабочего VPN.", AppBranding.ProductName);
+            return;
+        }
+
+        try
+        {
+            await _client.SendOkAsync<ServiceSnapshot>(IpcMethods.ConnectWorkVpn, request, _cts.Token);
+            _workConnectPollActive = true;
+            await PollWorkVpnConnectAsync();
+        }
+        catch (Exception ex)
+        {
+            _workConnectPollActive = false;
+            await RefreshAsync(force: true);
+            MessageBox.Show(ex.Message, AppBranding.ProductName);
+        }
+    }
+
+    private async Task PollWorkVpnConnectAsync()
+    {
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromMilliseconds(WorkVpnConnectBudget.TotalOperationMs + 30_000);
+        try
+        {
+            while (DateTime.UtcNow < deadline)
+            {
+                await RefreshAsync(force: true);
+                WorkVpnLiveStatus? work = _lastSnapshot?.WorkVpn;
+                if (work is null)
+                {
+                    break;
+                }
+
+                if (work.WorkVpnReady)
+                {
+                    return;
+                }
+
+                if (work.State == WorkVpnSessionState.Failed)
+                {
+                    if (!string.IsNullOrWhiteSpace(work.LastError))
+                    {
+                        MessageBox.Show(work.LastError, AppBranding.ProductName);
+                    }
+
+                    return;
+                }
+
+                if (work.State is WorkVpnSessionState.Disconnected && !work.Connected && work.LastError is not null)
+                {
+                    MessageBox.Show(work.LastError, AppBranding.ProductName);
+                    return;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2), _cts.Token);
+            }
+
+            await RefreshAsync(force: true);
+            if (_lastSnapshot?.WorkVpn.WorkVpnReady != true)
+            {
+                MessageBox.Show(
+                    "Подключение рабочего VPN всё ещё выполняется или прервано. Проверьте статус на главной вкладке.",
+                    AppBranding.ProductName);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            _workConnectPollActive = false;
+        }
+    }
+
+    private void OnBrowseWorkProfile(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog { Filter = "OpenVPN profile (*.ovpn)|*.ovpn" };
+        if (dlg.ShowDialog() == true)
+        {
+            WorkProfileBox.Text = dlg.FileName;
+        }
+    }
+
+    private bool PromptWorkCredentials(out string password)
+    {
+        password = "";
+        var w = new Window
+        {
+            Title = "Рабочий VPN",
+            Width = 420,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        };
+        var panel = new StackPanel { Margin = new Thickness(12) };
+        panel.Children.Add(new TextBlock { Text = "Пароль (не сохраняется):", Margin = new Thickness(0, 0, 0, 4) });
+        var pwd = new PasswordBox { Margin = new Thickness(0, 0, 0, 12) };
+        panel.Children.Add(pwd);
+        var buttons = new StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
+        };
+        var ok = new Button { Content = "Подключить", MinWidth = 100, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = "Отмена", MinWidth = 80, IsCancel = true };
+        bool accepted = false;
+        ok.Click += (_, _) => { accepted = true; w.DialogResult = true; };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+        panel.Children.Add(buttons);
+        w.Content = panel;
+        if (w.ShowDialog() != true || !accepted)
+        {
+            return false;
+        }
+
+        password = pwd.Password;
+        return !string.IsNullOrEmpty(password);
+    }
 
     private static void LogConnectStage(string stage)
     {

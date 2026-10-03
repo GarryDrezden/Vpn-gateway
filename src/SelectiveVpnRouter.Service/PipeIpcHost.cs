@@ -129,6 +129,8 @@ public sealed class PipeIpcHost : BackgroundService
                 IpcMethods.SetConfig => SetConfig(req.PayloadJson),
                 IpcMethods.ConnectVpn => await Connect(req.PayloadJson, ct).ConfigureAwait(false),
                 IpcMethods.DisconnectVpn => await Disconnect().ConfigureAwait(false),
+                IpcMethods.ConnectWorkVpn => await ConnectWork(req.PayloadJson, ct).ConfigureAwait(false),
+                IpcMethods.DisconnectWorkVpn => await DisconnectWork().ConfigureAwait(false),
                 IpcMethods.PauseRouting => Pause(true),
                 IpcMethods.ResumeRouting => Pause(false),
                 IpcMethods.EmergencyRestore => await Restore().ConfigureAwait(false),
@@ -190,6 +192,24 @@ public sealed class PipeIpcHost : BackgroundService
     private async Task<string> Disconnect()
     {
         await _engine.DisconnectAsync().ConfigureAwait(false);
+        return JsonSerializer.Serialize(_engine.Snapshot(), ConfigSerializer.JsonOptions);
+    }
+
+    private Task<string> ConnectWork(string? json, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        ConnectWorkVpnRequest? req = string.IsNullOrWhiteSpace(json)
+            ? null
+            : JsonSerializer.Deserialize<ConnectWorkVpnRequest>(json, ConfigSerializer.JsonOptions);
+        WorkVpnFeatureGate.ThrowIfDisabled();
+        _engine.Log("work-vpn-connect-request profile=" + (req?.ProfilePath ?? _engine.Config.WorkVpn.ProfilePath));
+        _engine.BeginConnectWorkVpn(req);
+        return Task.FromResult(JsonSerializer.Serialize(_engine.Snapshot(), ConfigSerializer.JsonOptions));
+    }
+
+    private async Task<string> DisconnectWork()
+    {
+        await _engine.DisconnectWorkVpnAsync().ConfigureAwait(false);
         return JsonSerializer.Serialize(_engine.Snapshot(), ConfigSerializer.JsonOptions);
     }
 

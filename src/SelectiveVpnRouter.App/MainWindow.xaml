@@ -48,44 +48,67 @@
               <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" Style="{StaticResource CardBorder}">
-              <StackPanel>
-                <TextBlock Text="Состояние VPN" Style="{StaticResource SectionTitleText}" Margin="0,0,0,12"/>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                  <Ellipse x:Name="HomeVpnStatusDot" Width="12" Height="12" Fill="#9CA3AF" VerticalAlignment="Center"/>
-                  <TextBlock x:Name="HomeVpnStatusText" Text="VPN Route off" FontSize="20" FontWeight="SemiBold"
-                             Foreground="{StaticResource TextPrimaryBrush}" Margin="10,0,0,0"/>
+            <StackPanel Grid.Column="0">
+              <Border x:Name="HomeWorkVpnCard" Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+                <StackPanel>
+                  <TextBlock Text="Рабочий VPN" Style="{StaticResource SectionTitleText}" Margin="0,0,0,12"/>
+                  <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <Ellipse x:Name="HomeWorkVpnStatusDot" Width="12" Height="12" Fill="#9CA3AF" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="HomeWorkVpnStatusText" Text="Отключён" FontSize="18" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="10,0,0,0"/>
+                  </StackPanel>
+                  <TextBlock x:Name="HomeWorkVpnSubtitle" Text="Корпоративный split-tunnel (отдельный OpenVPN)"
+                             Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="22,0,0,12"/>
+                  <TextBlock Text="Профиль" Style="{StaticResource SecondaryText}"/>
+                  <TextBlock x:Name="HomeWorkProfileText" Text="—" TextWrapping="Wrap" Margin="0,2,0,6"/>
+                  <TextBlock Text="Адрес" Style="{StaticResource SecondaryText}"/>
+                  <TextBlock x:Name="HomeWorkAddressText" Text="—" Margin="0,2,0,12"/>
+                  <StackPanel Orientation="Horizontal">
+                    <Button x:Name="ConnectWorkVpnButton" Content="Подключить" Click="OnStartWorkVpn" Style="{StaticResource PrimaryButton}"/>
+                    <Button x:Name="DisconnectWorkVpnButton" Content="Отключить" Click="OnStopWorkVpn" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Visibility="Collapsed"/>
+                  </StackPanel>
                 </StackPanel>
-                <TextBlock x:Name="HomeVpnSubtitle" Text="Приложения используют обычное подключение"
-                           Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="22,0,0,14"/>
+              </Border>
 
-                <Grid Margin="0,0,0,12">
-                  <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="150"/>
-                    <ColumnDefinition Width="*"/>
-                  </Grid.ColumnDefinitions>
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                  </Grid.RowDefinitions>
-                  <TextBlock Grid.Row="0" Grid.Column="0" Text="Профиль" Style="{StaticResource SecondaryText}"/>
-                  <TextBlock x:Name="HomeProfileText" Grid.Row="0" Grid.Column="1" Text="—" TextWrapping="Wrap"/>
-                  <TextBlock Grid.Row="1" Grid.Column="0" Text="Интернет" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
-                  <TextBlock x:Name="HomeDirectAdapterText" Grid.Row="1" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
-                  <TextBlock Grid.Row="2" Grid.Column="0" Text="VPN" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
-                  <TextBlock x:Name="HomeVpnAdapterText" Grid.Row="2" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
-                  <TextBlock Grid.Row="3" Grid.Column="0" Text="Адрес VPN" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
-                  <TextBlock x:Name="HomeVpnAddressText" Grid.Row="3" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
-                </Grid>
+              <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                  <TextBlock Text="VPN приложений" Style="{StaticResource SectionTitleText}" Margin="0,0,0,12"/>
+                  <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <Ellipse x:Name="HomeVpnStatusDot" Width="12" Height="12" Fill="#9CA3AF" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="HomeVpnStatusText" Text="VPN Route выключен" FontSize="18" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="10,0,0,0"/>
+                  </StackPanel>
+                  <TextBlock x:Name="HomeVpnSubtitle" Text="Selective WFP → proxy → OpenVPN"
+                             Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="22,0,0,14"/>
 
-                <StackPanel Orientation="Horizontal">
-                  <Button x:Name="ConnectVpnButton" Content="Подключить VPN" Click="OnStart" Style="{StaticResource PrimaryButton}"/>
-                  <Button x:Name="DisconnectVpnButton" Content="Отключить VPN" Click="OnStop" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Visibility="Collapsed"/>
+                  <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="150"/>
+                      <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Профиль" Style="{StaticResource SecondaryText}"/>
+                    <TextBlock x:Name="HomeProfileText" Grid.Row="0" Grid.Column="1" Text="—" TextWrapping="Wrap"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Интернет" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeDirectAdapterText" Grid.Row="1" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="VPN" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeVpnAdapterText" Grid.Row="2" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Адрес VPN" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeVpnAddressText" Grid.Row="3" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                  </Grid>
+
+                  <StackPanel Orientation="Horizontal">
+                    <Button x:Name="ConnectVpnButton" Content="Подключить" Click="OnStart" Style="{StaticResource PrimaryButton}"/>
+                    <Button x:Name="DisconnectVpnButton" Content="Отключить" Click="OnStop" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Visibility="Collapsed"/>
+                  </StackPanel>
                 </StackPanel>
-              </StackPanel>
-            </Border>
+              </Border>
+            </StackPanel>
 
             <Border Grid.Column="2" Style="{StaticResource CardBorder}">
               <StackPanel>
@@ -750,14 +773,14 @@
               <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" Margin="0,0,0,16">
+            <Grid x:Name="SetupTopGrid" Grid.Row="0" Margin="0,0,0,16">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="16"/>
                 <ColumnDefinition Width="*"/>
               </Grid.ColumnDefinitions>
 
-              <Border Grid.Column="0" Style="{StaticResource CardBorder}">
+              <Border x:Name="SetupVpnCard" Grid.Column="0" Style="{StaticResource CardBorder}">
                 <StackPanel>
                   <TextBlock Text="Подключение VPN" Style="{StaticResource SectionTitleText}" Margin="0,0,0,8"/>
                   <TextBlock TextWrapping="Wrap" Margin="0,0,0,12" Style="{StaticResource SecondaryText}"
@@ -791,9 +814,21 @@
                 </StackPanel>
               </Border>
 
-              <Border Grid.Column="2" Style="{StaticResource CardBorder}">
+              <Border x:Name="WorkVpnSettingsCard" Grid.Column="2" Style="{StaticResource CardBorder}">
                 <StackPanel>
-                  <TextBlock Text="Поведение" Style="{StaticResource SectionTitleText}" Margin="0,0,0,8"/>
+                  <TextBlock Text="Рабочий VPN" Style="{StaticResource SectionTitleText}" Margin="0,0,0,8"/>
+                  <CheckBox x:Name="WorkVpnEnabledBox" Content="Включить рабочий VPN" Margin="0,0,0,8"/>
+                  <TextBlock Text="Профиль (.ovpn)" Style="{StaticResource SecondaryText}"/>
+                  <DockPanel LastChildFill="True" Margin="0,4,0,0">
+                    <Button DockPanel.Dock="Right" Content="Обзор" Click="OnBrowseWorkProfile" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0"/>
+                    <TextBox x:Name="WorkProfileBox"/>
+                  </DockPanel>
+                  <TextBlock Text="Имя пользователя" Style="{StaticResource SecondaryText}" Margin="0,8,0,0"/>
+                  <TextBox x:Name="WorkUserBox" Margin="0,4,0,0"/>
+                  <CheckBox x:Name="WorkRememberUserBox" Margin="0,8,0,0" Content="Запомнить имя пользователя"/>
+                  <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" Style="{StaticResource SecondaryText}"
+                             Text="Пароль не сохраняется. При подключении запрашивается один раз и передаётся службе по IPC."/>
+                  <TextBlock Text="Поведение" Style="{StaticResource SectionTitleText}" Margin="0,16,0,8"/>
                   <TextBlock TextWrapping="Wrap" Style="{StaticResource SecondaryText}" Margin="0,0,0,12"
                              Text="После сохранения настроек подключите VPN на главной вкладке. Приложения с правилами VPN начнут использовать туннель автоматически."/>
                   <TextBlock x:Name="WizardHint" TextWrapping="Wrap" Style="{StaticResource SecondaryText}" Text=""/>

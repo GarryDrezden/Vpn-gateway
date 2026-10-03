@@ -37,6 +37,7 @@ internal static partial class DriverAndIsolationTests
             "vpn-lifecycle-reconnect-stress" => await RunVpnLifecycleReconnectStress(engine, confirm, ct).ConfigureAwait(false),
             "vpn-connection-routing-smoke" => await RunVpnConnectionRoutingSmoke(engine, ct).ConfigureAwait(false),
             "multi-app-routing-isolation" => await RunMultiAppRoutingIsolationAsync(engine, ct).ConfigureAwait(false),
+            "dual-vpn-coexistence" => RunDualVpnCoexistence(engine),
             "driver-stop" => Sc("driver-stop", "stop", confirm),
             "driver-uninstall" => await Script("driver-uninstall", "uninstall-driver.ps1", confirm, ct).ConfigureAwait(false),
             "preferred-default" => PreferredRoutes.Evaluate(engine.VpnAdapter?.Ipv4Index),

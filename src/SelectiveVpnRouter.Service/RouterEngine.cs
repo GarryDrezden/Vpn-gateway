@@ -45,7 +45,11 @@ public sealed partial class RouterEngine : IAsyncDisposable
     {
         ProgramDataStorage.EnsureConfigured();
         ProgramDataStorage.LogStartupDiagnostics(Log);
-        Config = ConfigSerializer.LoadOrDefault(AppPaths.ConfigFile);
+        AppConfiguration loaded = ConfigSerializer.LoadOrDefault(AppPaths.ConfigFile);
+        Config = loaded with
+        {
+            WorkVpn = WorkVpnProfileDefaults.WithMigrationDefaults(loaded.WorkVpn),
+        };
         CrashCleanup.ReconcileStale(Log);
     }
 
@@ -97,6 +101,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
             UdpNote = Config.Vpn.BlockQuicForVpnApps
                 ? "Optional QUIC/UDP 443 block for VPN-routed apps is enabled (forces TCP fallback). Full UDP routing is not implemented."
                 : "UDP/QUIC per-process routing is unsupported in this MVP (TCP only). Optional QUIC block is off.",
+            WorkVpn = BuildWorkVpnSnapshot(),
         };
     }
 
@@ -242,6 +247,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
 
     public async Task EmergencyRestoreAsync()
     {
+        await DisconnectWorkVpnAsync().ConfigureAwait(false);
         await DisconnectAsync().ConfigureAwait(false);
         CrashCleanup.ReconcileStale(Log);
         try

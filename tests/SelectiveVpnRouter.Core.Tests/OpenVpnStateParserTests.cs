@@ -43,4 +43,11 @@ public class OpenVpnStateParserTests
     {
         Assert.False(OpenVpnStateParser.IsConnected(line));
     }
+
+    [Fact]
+    public void Auth_failed_is_separate_from_prompt()
+    {
+        Assert.True(OpenVpnStateParser.IsAuthFailed("AUTH_FAILED"));
+        Assert.False(OpenVpnStateParser.IsAuthPrompt("AUTH_FAILED"));
+    }
 }

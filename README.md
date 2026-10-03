@@ -71,10 +71,21 @@ Technical note: [docs/vpn-lifecycle-stability.md](docs/vpn-lifecycle-stability.m
 
 ### Not verified yet (do not assume support)
 
+- In-app **Work/corporate VPN** connect (experimental code only; hidden unless `VPN_ROUTE_ENABLE_WORK_VPN=1`). Use **OpenVPN GUI** for corporate VPN; VPN Route handles selective app VPN only.
 - Full UDP / QUIC per-process routing
 - IPv6 VPN egress end-to-end
 - Arbitrary DNS routing for all apps
-- Production installer / consumer packaging
+
+### In progress — installer / upgrade V1
+
+Per-machine **Inno Setup** installer (see [docs/installer-and-upgrade.md](docs/installer-and-upgrade.md)):
+
+```powershell
+.\scripts\build-installer.ps1          # requires Inno Setup 6 ISCC.exe for .exe output
+.\scripts\test-installer-preflight.ps1
+```
+
+Developer deploy remains `scripts\update-desktop.ps1` (repo `artifacts\publish`).
 
 
 ## Developer update command
