@@ -11,6 +11,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using Microsoft.Win32;
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Core.Portable;
 using Forms = System.Windows.Forms;
 using MessageBox = System.Windows.MessageBox;
 using Window = System.Windows.Window;
@@ -45,6 +46,8 @@ public partial class MainWindow : Window
     private bool _exit;
     private bool _connectUiActive;
     private bool _workConnectPollActive;
+    private bool _bootstrapGateActive;
+    private bool _refreshLoopStarted;
     private AppConfiguration _config = new();
 
     public MainWindow()
@@ -96,10 +99,85 @@ public partial class MainWindow : Window
 
     private async Task StartAsync()
     {
+        if (!await EnsurePortableBootstrapReadyAsync())
+        {
+            return;
+        }
+
+        await ContinueStartupAsync();
+    }
+
+    private async Task ContinueStartupAsync()
+    {
         _config = await LoadConfigFromServiceOrDiskAsync();
         ApplyConfigToUi(_config);
-        _ = RefreshLoop();
-        await RefreshAsync();
+        if (!_refreshLoopStarted)
+        {
+            _refreshLoopStarted = true;
+            _ = RefreshLoop();
+        }
+
+        await RefreshAsync(force: true);
+    }
+
+    private async Task<bool> EnsurePortableBootstrapReadyAsync()
+    {
+        PortableBootstrapStatus status = PortableBootstrapUi.ReadStatus();
+        if (status.BootstrapState == PortableBootstrapState.Ready)
+        {
+            BootstrapOverlay.Visibility = Visibility.Collapsed;
+            _bootstrapGateActive = false;
+            return true;
+        }
+
+        _bootstrapGateActive = true;
+        BootstrapOverlay.Visibility = Visibility.Visible;
+        BootstrapOverlayMessage.Text = status.BootstrapState switch
+        {
+            PortableBootstrapState.NeedsRepair or PortableBootstrapState.VersionMismatch
+                => "Системные компоненты VPN Route требуют обновления для этой копии приложения.",
+            PortableBootstrapState.Broken
+                => status.Message,
+            _
+                => "Для работы требуется подготовить системные компоненты (служба и драйвер продукта).",
+        };
+        BootstrapActionButton.Content = status.BootstrapState is PortableBootstrapState.NeedsRepair
+            or PortableBootstrapState.VersionMismatch
+            ? "Обновить"
+            : "Подготовить";
+        BootstrapActionButton.IsEnabled = status.BootstrapState != PortableBootstrapState.Broken
+            || !status.DriverSigningBlocked;
+        BootstrapOverlayDetail.Text = status.DriverSigningBlocked
+            ? status.Message
+            : status.Message + Environment.NewLine + "Потребуется одноразовое подтверждение UAC.";
+        await Task.CompletedTask;
+        return false;
+    }
+
+    private async void OnBootstrapAction(object sender, RoutedEventArgs e)
+    {
+        string root = PortableBootstrapUi.ResolvePortableRoot();
+        try
+        {
+            BootstrapActionButton.IsEnabled = false;
+            PortableBootstrapLaunchResult launch = await Task.Run(() => PortableBootstrapUi.LaunchElevatedRepair(root));
+            if (launch.Outcome != PortableBootstrapLaunchOutcome.Ready)
+            {
+                BootstrapOverlayDetail.Text = launch.UserMessage;
+                BootstrapActionButton.IsEnabled = launch.Outcome != PortableBootstrapLaunchOutcome.DriverSigningBlocked;
+                return;
+            }
+
+            if (await EnsurePortableBootstrapReadyAsync())
+            {
+                await ContinueStartupAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            BootstrapOverlayDetail.Text = ex.Message;
+            BootstrapActionButton.IsEnabled = true;
+        }
     }
 
     private async Task<AppConfiguration> LoadConfigFromServiceOrDiskAsync()
@@ -135,6 +213,11 @@ public partial class MainWindow : Window
 
     private async Task RefreshAsync(bool force = false)
     {
+        if (_bootstrapGateActive && !force)
+        {
+            return;
+        }
+
         if (_connectUiActive && !force && !_workConnectPollActive)
         {
             return;

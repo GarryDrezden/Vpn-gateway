@@ -1,4 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.8" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SelectiveVpnRouter.Core.Tests" />
+  </ItemGroup>
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <RootNamespace>SelectiveVpnRouter.Core</RootNamespace>

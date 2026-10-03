@@ -7,7 +7,8 @@
         MinWidth="1000" MinHeight="650"
         Background="{StaticResource PageBackgroundBrush}"
         Closing="OnClosing">
-  <DockPanel x:Name="RootDock">
+  <Grid>
+    <DockPanel x:Name="RootDock">
     <Border x:Name="HeaderBorder" DockPanel.Dock="Top" Background="#1F2937" Padding="16,10">
       <Grid>
         <Grid.ColumnDefinitions>
@@ -887,4 +888,17 @@
       </TabItem>
     </TabControl>
   </DockPanel>
+
+    <Border x:Name="BootstrapOverlay" Background="#F9FAFB" Visibility="Collapsed">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="520" Margin="24">
+        <TextBlock Text="VPN Route" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,12"/>
+        <TextBlock x:Name="BootstrapOverlayMessage" TextWrapping="Wrap" TextAlignment="Center"
+                   Style="{StaticResource SecondaryText}" Margin="0,0,0,20"/>
+        <Button x:Name="BootstrapActionButton" Content="Подготовить" Click="OnBootstrapAction"
+                Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center" MinWidth="180" Padding="16,8"/>
+        <TextBlock x:Name="BootstrapOverlayDetail" TextWrapping="Wrap" TextAlignment="Center"
+                   Style="{StaticResource SecondaryText}" Margin="0,16,0,0"/>
+      </StackPanel>
+    </Border>
+  </Grid>
 </Window>

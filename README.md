@@ -76,16 +76,34 @@ Technical note: [docs/vpn-lifecycle-stability.md](docs/vpn-lifecycle-stability.m
 - IPv6 VPN egress end-to-end
 - Arbitrary DNS routing for all apps
 
-### In progress — installer / upgrade V1
+### In progress — portable distribution / bootstrap V1
 
-Per-machine **Inno Setup** installer (see [docs/installer-and-upgrade.md](docs/installer-and-upgrade.md)):
+End-user delivery is a **self-contained win-x64 ZIP** (no separate .NET 10 Runtime install). Windows **service + WFP driver** are registered once via elevated `SelectiveVpnRouter.Bootstrap.exe`; the App runs unelevated after bootstrap is **Ready**.
+
+Full guide: [docs/portable-distribution.md](docs/portable-distribution.md)
+
+**Build portable package** (from repo root):
 
 ```powershell
-.\scripts\build-installer.ps1          # requires Inno Setup 6 ISCC.exe for .exe output
-.\scripts\test-installer-preflight.ps1
+.\scripts\build-portable.ps1
+.\scripts\test-portable-preflight.ps1
 ```
 
-Developer deploy remains `scripts\update-desktop.ps1` (repo `artifacts\publish`).
+Output: `artifacts\portable\VPN-Route-<version>-x64.zip` and matching folder.
+
+**First run (extract anywhere, e.g. `C:\Tools\VPN Route\`)**
+
+1. Run `SelectiveVpnRouter.App.exe` — no UAC if service/driver already match this folder.
+2. If the overlay appears, choose **Подготовить** / **Обновить** → UAC → `SelectiveVpnRouter.Bootstrap.exe repair`.
+3. After **Ready**, configure **OpenVPN Community** path in Settings if needed (not bundled).
+
+**Update:** extract a newer ZIP over the same folder (or a new folder) and run **Обновить** when `VersionMismatch` / relocation is detected.
+
+**Move folder:** copy the whole directory; launch App → **NeedsRepair** → **Обновить** (rebinds service `ImagePath`).
+
+**Remove system components (keep config):** elevated `SelectiveVpnRouter.Bootstrap.exe remove --root "<portable dir>"` — preserves `%ProgramData%\SelectiveVpnRouter\config.json` and `%LocalAppData%\SelectiveVpnRouter\ui.json`.
+
+Developer deploy (framework-dependent publish) remains `scripts\update-desktop.ps1` → `artifacts\publish`.
 
 
 ## Developer update command
