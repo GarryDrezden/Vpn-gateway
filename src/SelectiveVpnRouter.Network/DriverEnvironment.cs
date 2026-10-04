@@ -27,7 +27,8 @@ public static class DriverEnvironment
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "drivers", "SelectiveVpnCallout.sys"),
         };
 
-        string? repoRelease = RepoPathResolver.ResolveRepoRelativePath("artifacts", "driver", "Release", "SelectiveVpnCallout.sys");
+        string? repoRelease = RepoPathResolver.ResolveRepoRelativePath("artifacts", "driver", "staging", "Release", "SelectiveVpnCallout.sys")
+            ?? RepoPathResolver.ResolveRepoRelativePath("artifacts", "driver", "Release", "SelectiveVpnCallout.sys");
         if (repoRelease is not null)
         {
             candidates.Add(repoRelease);

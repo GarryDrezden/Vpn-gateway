@@ -42,6 +42,8 @@ internal static partial class DriverAndIsolationTests
             "driver-uninstall" => await Script("driver-uninstall", "uninstall-driver.ps1", confirm, ct).ConfigureAwait(false),
             "preferred-default" => PreferredRoutes.Evaluate(engine.VpnAdapter?.Ipv4Index),
             "proxy-loop" => await ProxyLoop(engine, ct).ConfigureAwait(false),
+            "loopback-local-callback" => await LoopbackLocalCallback(engine, ct).ConfigureAwait(false),
+            "packaged-routing-targets" => PackagedRoutingTargets(engine),
             "parent-child" => await ParentChild(engine, ct).ConfigureAwait(false),
             "ipv6-leak" => await Ipv6Leak(engine, ct).ConfigureAwait(false),
             "kill-service" => KillService(engine, confirm),
@@ -100,6 +102,7 @@ internal static partial class DriverAndIsolationTests
             + " acqClassifyFail=" + a.AcquireClassifyHandleFailures
             + " acqWritableFail=" + a.AcquireWritableLayerDataFailures
             + " loopbackProxy=" + a.AlreadyLoopbackProxy
+            + " loopbackBypass=" + a.LoopbackDestinationBypass
             + " allocFail=" + a.AllocationFailures
             + " lastPid=" + a.LastClassifyPid
             + " lastFilterId=" + a.LastFilterId
@@ -425,6 +428,190 @@ internal static partial class DriverAndIsolationTests
         }
     }
 
+    private static async Task<DiagnosticResult> LoopbackLocalCallback(RouterEngine engine, CancellationToken ct)
+    {
+        if (FindProbe() is null)
+        {
+            return Fail("loopback-local-callback", Bilingual("Probe.exe missing.", "Probe.exe не найден."));
+        }
+
+        ServiceSnapshot snap0 = engine.Snapshot();
+        if (!snap0.DriverLoaded)
+        {
+            return Fail("loopback-local-callback", Bilingual(
+                "Callout driver is not loaded.",
+                "Callout-драйвер не загружен."));
+        }
+
+        if (engine.ProxyPort is null)
+        {
+            return Skip("loopback-local-callback", Bilingual(
+                "VPN not connected (proxy inactive). Connect VPN Route first.",
+                "VPN не подключён (прокси не активен). Сначала нажмите Подключить в VPN Route."));
+        }
+
+        string probeExe = Path.GetFullPath(FindProbe()!);
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        try
+        {
+            using (var sanityClient = new TcpClient())
+            {
+                Task<TcpClient> sanityAccept = listener.AcceptTcpClientAsync(ct).AsTask();
+                await sanityClient.ConnectAsync(IPAddress.Loopback, port, ct).ConfigureAwait(false);
+                using TcpClient sanityServer = await sanityAccept.WaitAsync(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+            }
+
+            AppConfiguration previous = engine.Config;
+            CalloutArmStatus calloutBaseline = engine.Snapshot().Callout;
+            TransparentProxyDiagnostics proxyBaseline = engine.Snapshot().ProxyDiagnostics;
+            uint loopbackBypassBaseline = calloutBaseline.LoopbackDestinationBypass;
+
+            try
+            {
+                engine.SaveConfig(previous with
+                {
+                    Rules = previous.Rules
+                        .Where(r => r.Name != "tmp-loopback-probe")
+                        .Concat([RoutingRule.Create(RuleType.Application, "tmp-loopback-probe", probeExe, RouteMode.Vpn)])
+                        .ToList(),
+                });
+                await engine.RefreshPolicyAsync().ConfigureAwait(false);
+
+                WfpPolicyDiagnostics wfpPolicy = engine.WfpPolicy;
+                WfpFilterInstallResult? probeRedirect = WfpPolicyHealth.FindCalloutFilter(wfpPolicy, probeExe);
+                WfpFilterInstallResult? probeLoopback = WfpPolicyHealth.FindLoopbackPermitFilter(wfpPolicy, probeExe);
+                string preflight = FormatLoopbackPreflight(engine, probeExe, probeRedirect, probeLoopback, wfpPolicy);
+
+                if (!WfpPolicyHealth.IsVpnAppWfpReady(wfpPolicy, probeExe))
+                {
+                    return Fail("loopback-local-callback", Bilingual(
+                        "CONTROL FAIL: Probe VPN rule was saved but required WFP filters are missing (redirect + 127/8 PERMIT). " + preflight,
+                        "CONTROL FAIL: VPN-правило Probe сохранено, но нужные WFP-фильтры отсутствуют (redirect + 127/8 PERMIT). " + preflight));
+                }
+
+                string url = engine.Config.Vpn.PublicIpEndpoint ?? "https://api.ipify.org";
+                uint redirectBeforeExternal = engine.Snapshot().Callout.RedirectApplySuccess;
+                uint proxyAcceptedBeforeExternal = engine.Snapshot().ProxyDiagnostics.AcceptedConnections;
+                ProbeRunResult externalRun = await RunProbe(probeExe, ["--http", url], ct).ConfigureAwait(false);
+                if (ProbeLaunchFailure("loopback-local-callback", externalRun) is DiagnosticResult externalInfraFail)
+                {
+                    return externalInfraFail;
+                }
+
+                ServiceSnapshot afterExternal = engine.Snapshot();
+                uint redirectDeltaExternal = afterExternal.Callout.RedirectApplySuccess - redirectBeforeExternal;
+                uint proxyAcceptedDeltaExternal = afterExternal.ProxyDiagnostics.AcceptedConnections - proxyAcceptedBeforeExternal;
+                bool externalHttpOk = externalRun.Output.Contains("http OK", StringComparison.OrdinalIgnoreCase);
+                bool externalRedirectObserved = redirectDeltaExternal > 0 || proxyAcceptedDeltaExternal > 0;
+
+                if (!externalRedirectObserved || !externalHttpOk)
+                {
+                    return Fail("loopback-local-callback", Bilingual(
+                        "CONTROL FAIL: VPN-routed Probe external HTTP did not prove WFP redirect (fix before loopback test). "
+                        + $"redirectDelta={redirectDeltaExternal} proxyAcceptedDelta={proxyAcceptedDeltaExternal} httpOk={externalHttpOk}. "
+                        + preflight + " probe: " + externalRun.Output.Trim(),
+                        "CONTROL FAIL: внешний HTTP VPN Probe не подтвердил WFP redirect (сначала исправьте). "
+                        + $"redirectDelta={redirectDeltaExternal} proxyAcceptedDelta={proxyAcceptedDeltaExternal} httpOk={externalHttpOk}. "
+                        + preflight + " probe: " + externalRun.Output.Trim()));
+                }
+
+                uint redirectBeforeLocal = afterExternal.Callout.RedirectApplySuccess;
+                uint proxyAcceptedBeforeLocal = afterExternal.ProxyDiagnostics.AcceptedConnections;
+                Task<TcpClient> localAccept = listener.AcceptTcpClientAsync(ct).AsTask();
+                ProbeRunResult localRun = await RunProbe(probeExe, ["--tcp", "127.0.0.1", port.ToString()], ct).ConfigureAwait(false);
+                if (ProbeLaunchFailure("loopback-local-callback", localRun) is DiagnosticResult localInfraFail)
+                {
+                    return localInfraFail;
+                }
+
+                if (!localRun.Output.Contains("tcp OK", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Fail("loopback-local-callback", Bilingual(
+                        "VPN-routed Probe failed to reach local listener (OAuth callback shape). "
+                        + preflight + " probe: " + localRun.Output.Trim(),
+                        "VPN-маршрутизированный Probe не достиг локального listener (OAuth callback). "
+                        + preflight + " probe: " + localRun.Output.Trim()));
+                }
+
+                using TcpClient accepted = await localAccept.WaitAsync(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+                _ = accepted;
+
+                ServiceSnapshot afterLocal = engine.Snapshot();
+                uint loopbackBypassDelta = afterLocal.Callout.LoopbackDestinationBypass - loopbackBypassBaseline;
+                uint redirectDeltaLocal = afterLocal.Callout.RedirectApplySuccess - redirectBeforeLocal;
+                uint proxyAcceptedDeltaLocal = afterLocal.ProxyDiagnostics.AcceptedConnections - proxyAcceptedBeforeLocal;
+
+                if (loopbackBypassDelta == 0 && redirectDeltaLocal > 0)
+                {
+                    return Fail("loopback-local-callback", Bilingual(
+                        "Loopback TCP was redirected instead of bypassed (127/8 PERMIT path not hit). "
+                        + $"loopbackBypassDelta={loopbackBypassDelta} redirectDeltaLocal={redirectDeltaLocal}. "
+                        + preflight,
+                        "Loopback TCP был перенаправлен вместо bypass (127/8 PERMIT не сработал). "
+                        + $"loopbackBypassDelta={loopbackBypassDelta} redirectDeltaLocal={redirectDeltaLocal}. "
+                        + preflight));
+                }
+
+                if (proxyAcceptedDeltaLocal > 0)
+                {
+                    return Fail("loopback-local-callback", Bilingual(
+                        "Transparent proxy accepted a loopback connection (should stay local). "
+                        + preflight,
+                        "Прозрачный прокси принял loopback-подключение (должно оставаться локальным). "
+                        + preflight));
+                }
+
+                return Pass("loopback-local-callback", Bilingual(
+                    $"CONTROL PASS (external redirect). Local 127.0.0.1:{port} OK without proxy; loopbackBypass+={loopbackBypassDelta}. "
+                    + preflight,
+                    $"CONTROL PASS (внешний redirect). Локальный 127.0.0.1:{port} OK без прокси; loopbackBypass+={loopbackBypassDelta}. "
+                    + preflight));
+            }
+            finally
+            {
+                engine.SaveConfig(previous with
+                {
+                    Rules = previous.Rules.Where(r => r.Name != "tmp-loopback-probe").ToList(),
+                });
+                await engine.RefreshPolicyAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Fail("loopback-local-callback", Bilingual(
+                "Listener sanity or harness failure: " + ex.Message,
+                "Сбой listener/harness: " + ex.Message));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    private static string FormatLoopbackPreflight(
+        RouterEngine engine,
+        string probeExe,
+        WfpFilterInstallResult? probeRedirect,
+        WfpFilterInstallResult? probeLoopback,
+        WfpPolicyDiagnostics wfpPolicy)
+    {
+        ServiceSnapshot s = engine.Snapshot();
+        string redirectLine = probeRedirect is null
+            ? "(no redirect callout filter)"
+            : WfpPolicyHealth.FormatFilterLine(probeRedirect);
+        string loopbackLine = probeLoopback is null
+            ? "(no loopback permit filter)"
+            : WfpPolicyHealth.FormatFilterLine(probeLoopback);
+        return $"probePath={probeExe} vpnRoutingReady={s.VpnRoutingReady} transparentRedirect={s.TransparentRedirectActive} "
+            + $"driverLoaded={s.DriverLoaded} proxyPort={engine.ProxyPort} "
+            + $"installedAppFilters={wfpPolicy.InstalledAppFilters} policyHealthy={wfpPolicy.PolicyHealthy} "
+            + $"loopbackBypass={s.Callout.LoopbackDestinationBypass} redirectSuccess={s.Callout.RedirectApplySuccess} "
+            + $"redirectFilter=[{redirectLine}] loopbackPermitFilter=[{loopbackLine}]";
+    }
+
     private static async Task<DiagnosticResult> ProxyLoop(RouterEngine engine, CancellationToken ct)
     {
         if (engine.ProxyPort is not int port)
@@ -658,6 +845,7 @@ internal static partial class DriverAndIsolationTests
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             };
+            ProcessOutputEncoding.UseUtf8(psi);
             foreach (string a in args)
             {
                 psi.ArgumentList.Add(a);
@@ -741,6 +929,8 @@ internal static partial class DriverAndIsolationTests
     }
 
     private static DiagnosticResult Pass(string n, string m) => new() { Name = n, Outcome = DiagnosticOutcomes.Pass, Message = m };
+    private static DiagnosticResult Warning(string n, string m) => new() { Name = n, Outcome = DiagnosticOutcomes.Warning, Message = m };
+    private static DiagnosticResult Skip(string n, string m) => new() { Name = n, Outcome = DiagnosticOutcomes.Skip, Message = m };
     private static DiagnosticResult Fail(string n, string m) => new() { Name = n, Outcome = DiagnosticOutcomes.Fail, Message = m };
     private static DiagnosticResult Warn(string n, string m) => new() { Name = n, Outcome = DiagnosticOutcomes.Warning, Message = m };
     private static DiagnosticResult Info(string n, string m) => new() { Name = n, Outcome = DiagnosticOutcomes.Pass, Message = m };

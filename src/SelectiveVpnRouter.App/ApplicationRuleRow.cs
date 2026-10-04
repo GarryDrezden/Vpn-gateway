@@ -18,6 +18,8 @@ public sealed class ApplicationRuleRow : INotifyPropertyChanged
         DisplayName = rule.Name;
         ExePath = rule.Target;
         FileName = Path.GetFileName(rule.Target);
+        PackagedBinding = rule.PackagedBinding;
+        PackagedTargetMissing = rule.PackagedBinding is not null && !File.Exists(rule.Target);
         _mode = rule.Mode;
         _vpnConnected = vpnConnected;
         Enabled = rule.Enabled;
@@ -30,6 +32,8 @@ public sealed class ApplicationRuleRow : INotifyPropertyChanged
     public string DisplayName { get; }
     public string ExePath { get; }
     public string FileName { get; }
+    public PackagedApplicationBinding? PackagedBinding { get; }
+    public bool PackagedTargetMissing { get; }
     public ImageSource Icon { get; }
     public bool Enabled { get; }
 
@@ -52,7 +56,18 @@ public sealed class ApplicationRuleRow : INotifyPropertyChanged
 
     public bool IsVpnSelected => Mode == RouteMode.Vpn;
     public bool IsDirectSelected => Mode == RouteMode.Direct;
-    public string ConfiguredRouteText => !Enabled ? "Правило отключено" : Mode == RouteMode.Vpn ? "Настроено: VPN" : "Настроено: напрямую";
+    public string ConfiguredRouteText
+    {
+        get
+        {
+            if (PackagedTargetMissing)
+            {
+                return "Microsoft Store: приложение не установлено";
+            }
+
+            return !Enabled ? "Правило отключено" : Mode == RouteMode.Vpn ? "Настроено: VPN" : "Настроено: напрямую";
+        }
+    }
 
     public string RuntimeTrafficText
     {
@@ -77,7 +92,16 @@ public sealed class ApplicationRuleRow : INotifyPropertyChanged
     public string StatusBrushKey =>
         ApplicationRuleRuntimePresentation.GetStatusBrushKey(Enabled, RuntimeTrafficText);
 
-    public RoutingRule ToRule() => new() { Id = Id, Enabled = Enabled, Type = RuleType.Application, Name = DisplayName, Target = ExePath, Mode = Mode };
+    public RoutingRule ToRule() => new()
+    {
+        Id = Id,
+        Enabled = Enabled,
+        Type = RuleType.Application,
+        Name = DisplayName,
+        Target = ExePath,
+        Mode = Mode,
+        PackagedBinding = PackagedBinding,
+    };
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Notify(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

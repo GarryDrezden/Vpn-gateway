@@ -5,6 +5,7 @@ public static class PortableLayout
     public const string ServiceExeName = "SelectiveVpnRouter.Service.exe";
     public const string AppExeName = "SelectiveVpnRouter.App.exe";
     public const string BootstrapExeName = "SelectiveVpnRouter.Bootstrap.exe";
+    public const string ProbeExeName = "SelectiveVpnRouter.Probe.exe";
     public const string ManifestFileName = "portable-manifest.json";
     public const string ReadmeFileName = "README.txt";
     public const string DriverSubfolder = "driver";

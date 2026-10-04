@@ -103,6 +103,7 @@ extern volatile LONG gExitProxyPid;
 extern volatile LONG gAcquireClassifyHandleFailures;
 extern volatile LONG gAcquireWritableLayerDataFailures;
 extern volatile LONG gAlreadyLoopbackProxy;
+extern volatile LONG gLoopbackDestinationBypass;
 extern volatile LONG gAllocationFailures;
 extern volatile UINT64 gLastClassifyPid;
 extern volatile UINT64 gLastFilterId;

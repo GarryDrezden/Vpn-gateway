@@ -125,7 +125,8 @@ public static class ConnectionUxProjection
         ConnectionRouteFilterKind routeFilter,
         string? search,
         DateTimeOffset? utcNow = null,
-        TimeSpan? recentClosedWindow = null)
+        TimeSpan? recentClosedWindow = null,
+        PackagedRoutingTargetIndex? packagedRoutingIndex = null)
     {
         DateTimeOffset now = utcNow ?? DateTimeOffset.UtcNow;
         TimeSpan recentWindow = recentClosedWindow ?? DefaultRecentClosedWindow;
@@ -137,7 +138,7 @@ public static class ConnectionUxProjection
         }
 
         List<ConnectionFlowProjection> projections = visible
-            .Select(f => ToFlowProjection(f, now, recentWindow))
+            .Select(f => ToFlowProjection(f, now, recentWindow, packagedRoutingIndex))
             .ToList();
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -151,7 +152,7 @@ public static class ConnectionUxProjection
         }
 
         var grouped = projections
-            .GroupBy(p => NormalizeGroupKey(p.ProcessPath), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(p => NormalizeGroupKey(p.ProcessPath, packagedRoutingIndex), StringComparer.OrdinalIgnoreCase)
             .Select(g => BuildGroup(g.Key, g.ToList(), now, recentWindow))
             .Where(g => g.TotalVisibleFlows > 0)
             .ToList();
@@ -192,7 +193,8 @@ public static class ConnectionUxProjection
     public static ConnectionFlowProjection ToFlowProjection(
         FlowEvent flow,
         DateTimeOffset utcNow,
-        TimeSpan recentClosedWindow)
+        TimeSpan recentClosedWindow,
+        PackagedRoutingTargetIndex? packagedRoutingIndex = null)
     {
         ConnectionFlowDisplayState displayState = ClassifyDisplayState(flow.Status);
         bool recentClosed = displayState == ConnectionFlowDisplayState.Closing
@@ -205,7 +207,7 @@ public static class ConnectionUxProjection
 
         return new ConnectionFlowProjection(
             flow.FlowId,
-            ApplicationRulesHelper.ResolveFlowApplicationDisplayName(flow),
+            ApplicationRulesHelper.ResolveFlowApplicationDisplayName(flow, packagedRoutingIndex),
             flow.ProcessPath,
             flow.Pid,
             $"{flow.Destination}:{flow.Port}",
@@ -313,11 +315,16 @@ public static class ConnectionUxProjection
         _ => "RouteBadgeUnknown",
     };
 
-    internal static string NormalizeGroupKey(string processPath)
+    internal static string NormalizeGroupKey(string processPath, PackagedRoutingTargetIndex? packagedRoutingIndex = null)
     {
         if (string.IsNullOrWhiteSpace(processPath))
         {
             return "(unknown)";
+        }
+
+        if (packagedRoutingIndex is not null)
+        {
+            return packagedRoutingIndex.NormalizeConnectionsGroupKey(processPath);
         }
 
         try

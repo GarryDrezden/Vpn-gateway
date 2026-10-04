@@ -132,6 +132,7 @@ public sealed class CalloutDriverClient : IDisposable
                 AcquireClassifyHandleFailures = buf.AcquireClassifyHandleFailures,
                 AcquireWritableLayerDataFailures = buf.AcquireWritableLayerDataFailures,
                 AlreadyLoopbackProxy = buf.AlreadyLoopbackProxy,
+                LoopbackDestinationBypass = buf.RuntimeCapturePad,
                 AllocationFailures = buf.AllocationFailures,
                 LastClassifyPid = buf.LastClassifyPid,
                 LastFilterId = buf.LastFilterId,

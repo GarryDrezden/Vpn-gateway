@@ -146,6 +146,8 @@ public sealed record CalloutArmStatus
     public uint AcquireClassifyHandleFailures { get; init; }
     public uint AcquireWritableLayerDataFailures { get; init; }
     public uint AlreadyLoopbackProxy { get; init; }
+    /// <summary>127.0.0.0/8 destinations permitted without redirect (driver RuntimeCapturePad).</summary>
+    public uint LoopbackDestinationBypass { get; init; }
     public uint AllocationFailures { get; init; }
     public ulong LastClassifyPid { get; init; }
     public ulong LastFilterId { get; init; }
@@ -180,6 +182,7 @@ public static class DiagnosticOutcomes
     public const string Pass = "PASS";
     public const string Fail = "FAIL";
     public const string Warning = "WARNING";
+    public const string Skip = "SKIP";
 }
 
 public static class IpcMethods

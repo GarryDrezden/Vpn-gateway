@@ -8,9 +8,11 @@ using System.Net.Sockets;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Core.ApplicationDiscovery;
 using SelectiveVpnRouter.Core.Portable;
 using Forms = System.Windows.Forms;
 using MessageBox = System.Windows.MessageBox;
@@ -49,6 +51,9 @@ public partial class MainWindow : Window
     private bool _bootstrapGateActive;
     private bool _refreshLoopStarted;
     private AppConfiguration _config = new();
+    private readonly ApplicationDiscoveryCoordinator _appDiscovery = new();
+    private bool _installedDiscoveryLoaded;
+    private string _lastDiagRaw = string.Empty;
 
     public MainWindow()
     {
@@ -60,6 +65,10 @@ public partial class MainWindow : Window
         }
 
         AppsList.ItemsSource = _filteredAppRules;
+        InstalledAppsList.ItemsSource = _appDiscovery.InstalledRows;
+        RunningAppsList.ItemsSource = _appDiscovery.RunningRows;
+        _appDiscovery.StateChanged += () => Dispatcher.Invoke(UpdateDiscoveryLoadingUi);
+        _appDiscovery.SelectionCountsChanged += () => Dispatcher.Invoke(UpdateDiscoverySelectionBars);
         RulesGrid.ItemsSource = _advancedRules;
         RealAppFlowGrid.ItemsSource = _realAppFlows;
         ConnectionGroupsList.ItemsSource = _connectionGroups;
@@ -70,6 +79,8 @@ public partial class MainWindow : Window
             RefreshConnectionsBoard();
         };
         UpdateFlowSearchPlaceholder();
+        UpdateInstalledAppsSearchPlaceholder();
+        UpdateRunningAppsSearchPlaceholder();
         FlowFilterAll.Click += OnFlowFilterChanged;
         FlowFilterVpn.Click += OnFlowFilterChanged;
         FlowFilterDirect.Click += OnFlowFilterChanged;
@@ -435,11 +446,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        PackagedRoutingTargetIndex? packagedIndex = OperatingSystem.IsWindows()
+            ? PackagedRoutingTargetIndex.Build(_config.Rules, new WindowsPackagedApplicationPathResolver())
+            : null;
         ConnectionsBoardProjection board = ConnectionUxProjection.Build(
             snap.Flows,
             snap.VpnRoutingReady,
             GetConnectionRouteFilterKind(),
-            FlowSearchBox.Text);
+            FlowSearchBox.Text,
+            packagedRoutingIndex: packagedIndex);
 
         ConnectionsRoutingStatusText.Text = board.RoutingStatusLine;
         ConnectionsSummaryText.Text = board.Summary.ApplicationsLine;
@@ -473,6 +488,26 @@ public partial class MainWindow : Window
 
         ConnectionsListScroll.ScrollToVerticalOffset(scrollOffset);
         RestoreConnectionSelection();
+    }
+
+    private void SyncDiscoveryViewOptions()
+    {
+        _appDiscovery.ShowSystemAndServiceEntries = InstalledShowSystemCheckBox.IsChecked == true;
+        _appDiscovery.ShowBackgroundProcesses = RunningShowBackgroundCheckBox.IsChecked == true;
+    }
+
+    private void UpdateInstalledAppsSearchPlaceholder()
+    {
+        InstalledAppsSearchPlaceholder.Visibility = string.IsNullOrWhiteSpace(InstalledAppsSearchBox.Text)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void UpdateRunningAppsSearchPlaceholder()
+    {
+        RunningAppsSearchPlaceholder.Visibility = string.IsNullOrWhiteSpace(RunningAppsSearchBox.Text)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void UpdateFlowSearchPlaceholder()
@@ -729,12 +764,27 @@ public partial class MainWindow : Window
 
     private void AppendDiagResult(string line)
     {
-        DiagResults.Items.Insert(0, line);
-        if (line.StartsWith("FAIL", StringComparison.OrdinalIgnoreCase)
-            || line.StartsWith("WARNING", StringComparison.OrdinalIgnoreCase))
-        {
-            DiagLogExpander.IsExpanded = true;
-        }
+        _lastDiagRaw = line;
+        string display = DiagnosticDisplayFormatter.FormatForUi(line);
+        DiagResults.Items.Insert(0, new DiagJournalEntry(line, display));
+        DiagInnerTabs.SelectedIndex = 0;
+        DiagResultDetailBox.Text = display;
+        DiagResultDetailBox.TextWrapping = TextWrapping.Wrap;
+        DiagResultDetailBox.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        DiagResultDetailBox.ScrollToHome();
+
+        bool pass = line.StartsWith("PASS", StringComparison.OrdinalIgnoreCase);
+        bool fail = line.StartsWith("FAIL", StringComparison.OrdinalIgnoreCase);
+        bool warn = line.StartsWith("WARNING", StringComparison.OrdinalIgnoreCase);
+        DiagResultHeadline.Text = pass ? "✓ PASS" : fail ? "✗ FAIL" : warn ? "⚠ WARNING" : "Результат последней проверки";
+        DiagResultPanel.BorderBrush = pass
+            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x15, 0x80, 0x3D))
+            : fail
+                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xB9, 0x1C, 0x1C))
+                : warn
+                    ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xB4, 0x53, 0x09))
+                    : System.Windows.Media.Brushes.LightGray;
+        DiagResultPanel.BorderThickness = pass || fail || warn ? new Thickness(2) : new Thickness(1);
     }
 
     private static bool IsDiagnosticPass(string? outcome) =>
@@ -777,7 +827,7 @@ public partial class MainWindow : Window
             : $"⚠ {success}/{tests.Length} — {failures} проблем(а)";
         if (failures > 0)
         {
-            DiagLogExpander.IsExpanded = true;
+            DiagInnerTabs.SelectedIndex = 0;
         }
     }
 
@@ -794,8 +844,175 @@ public partial class MainWindow : Window
         if (result.IsDuplicate) { MessageBox.Show("Это приложение уже добавлено.", AppBranding.ProductName); return; }
         if (!result.Ok || result.Config is null || result.Rule is null) { MessageBox.Show(result.Error ?? "Error", AppBranding.ProductName); return; }
         await SaveConfigAsync(result.Config);
+        _config = result.Config;
         _appRules.Add(new ApplicationRuleRow(result.Rule, await IsVpnConnectedAsync()));
         RefreshAppsFilter();
+        await RefreshDiscoveryAfterRulesChangedAsync();
+    }
+
+    private IEnumerable<RoutingRule> GetPermanentApplicationRulesForDiscovery() =>
+        ApplicationRulesHelper.GetPermanentApplicationRules(_config);
+
+    private async void OnAppsInnerTabChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.Source, AppsInnerTabControl))
+        {
+            return;
+        }
+
+        if (AppsInnerTabControl.SelectedIndex == 1 && !_installedDiscoveryLoaded)
+        {
+            _installedDiscoveryLoaded = true;
+            await RefreshInstalledAppsAsync(forceRescan: true);
+        }
+        else if (AppsInnerTabControl.SelectedIndex == 2)
+        {
+            await RefreshRunningAppsAsync();
+        }
+    }
+
+    private async void OnRefreshInstalledApps(object sender, RoutedEventArgs e) =>
+        await RefreshInstalledAppsAsync(forceRescan: true);
+
+    private async void OnRefreshRunningApps(object sender, RoutedEventArgs e) =>
+        await RefreshRunningAppsAsync();
+
+    private async void OnInstalledAppsSearchChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateInstalledAppsSearchPlaceholder();
+        await RefreshInstalledAppsAsync(forceRescan: false);
+    }
+
+    private async void OnRunningAppsSearchChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateRunningAppsSearchPlaceholder();
+        await RefreshRunningAppsAsync();
+    }
+
+    private async void OnInstalledDiscoveryOptionsChanged(object sender, RoutedEventArgs e)
+    {
+        SyncDiscoveryViewOptions();
+        await RefreshInstalledAppsAsync(forceRescan: true);
+    }
+
+    private async void OnRunningDiscoveryOptionsChanged(object sender, RoutedEventArgs e)
+    {
+        SyncDiscoveryViewOptions();
+        await RefreshRunningAppsAsync();
+    }
+
+    private void OnInstalledAppsSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateDiscoverySelectionBars();
+
+    private void OnRunningAppsSelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateDiscoverySelectionBars();
+
+    private async void OnAddInstalledSelectionVpn(object sender, RoutedEventArgs e) =>
+        await AddDiscoveredSelectionAsync(_appDiscovery.GetSelectedInstalled(), RouteMode.Vpn);
+
+    private async void OnAddInstalledSelectionDirect(object sender, RoutedEventArgs e) =>
+        await AddDiscoveredSelectionAsync(_appDiscovery.GetSelectedInstalled(), RouteMode.Direct);
+
+    private async void OnAddRunningSelectionVpn(object sender, RoutedEventArgs e) =>
+        await AddDiscoveredSelectionAsync(_appDiscovery.GetSelectedRunning(), RouteMode.Vpn);
+
+    private async void OnAddRunningSelectionDirect(object sender, RoutedEventArgs e) =>
+        await AddDiscoveredSelectionAsync(_appDiscovery.GetSelectedRunning(), RouteMode.Direct);
+
+    private async Task RefreshInstalledAppsAsync(bool forceRescan)
+    {
+        try
+        {
+            SyncDiscoveryViewOptions();
+            await _appDiscovery.RefreshInstalledAsync(
+                GetPermanentApplicationRulesForDiscovery(),
+                InstalledAppsSearchBox.Text,
+                forceRescan);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, AppBranding.ProductName);
+        }
+
+        UpdateDiscoverySelectionBars();
+    }
+
+    private async Task RefreshRunningAppsAsync()
+    {
+        try
+        {
+            SyncDiscoveryViewOptions();
+            await _appDiscovery.RefreshRunningAsync(
+                GetPermanentApplicationRulesForDiscovery(),
+                RunningAppsSearchBox.Text);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, AppBranding.ProductName);
+        }
+
+        UpdateDiscoverySelectionBars();
+    }
+
+    private async Task AddDiscoveredSelectionAsync(IReadOnlyList<DiscoveredApplicationRow> selected, RouteMode mode)
+    {
+        if (selected.Count == 0)
+        {
+            return;
+        }
+
+        ApplicationDiscoveryBatchAddResult batch = ApplicationDiscoveryCatalog.AddSelectedRules(
+            _config,
+            selected.Select(r => r.Application),
+            mode);
+        if (batch.AddedCount == 0)
+        {
+            MessageBox.Show("Выбранные приложения уже настроены или не удалось добавить.", AppBranding.ProductName);
+            return;
+        }
+
+        await SaveConfigAsync(batch.Config);
+        _config = batch.Config;
+        bool vpnConnected = await IsVpnConnectedAsync();
+        foreach (RoutingRule rule in batch.AddedRules)
+        {
+            _appRules.Add(new ApplicationRuleRow(rule, vpnConnected));
+        }
+
+        RefreshAppsFilter();
+        _appDiscovery.ClearInstalledSelection();
+        _appDiscovery.ClearRunningSelection();
+        await RefreshDiscoveryAfterRulesChangedAsync();
+        UpdateDiscoverySelectionBars();
+    }
+
+    private async Task RefreshDiscoveryAfterRulesChangedAsync()
+    {
+        if (_installedDiscoveryLoaded)
+        {
+            await RefreshInstalledAppsAsync(forceRescan: false);
+        }
+
+        if (AppsInnerTabControl.SelectedIndex == 2)
+        {
+            await RefreshRunningAppsAsync();
+        }
+    }
+
+    private void UpdateDiscoveryLoadingUi()
+    {
+        InstalledAppsLoadingText.Visibility = _appDiscovery.IsInstalledLoading ? Visibility.Visible : Visibility.Collapsed;
+        RunningAppsLoadingText.Visibility = _appDiscovery.IsRunningLoading ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdateDiscoverySelectionBars()
+    {
+        int installedCount = _appDiscovery.GetSelectedInstalled().Count;
+        int runningCount = _appDiscovery.GetSelectedRunning().Count;
+        InstalledAppsSelectionText.Text = $"Выбрано: {installedCount}";
+        RunningAppsSelectionText.Text = $"Выбрано: {runningCount}";
+        InstalledAppsActionBar.Visibility = installedCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        RunningAppsActionBar.Visibility = runningCount > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private async void OnAppRouteToggle(object sender, RoutedEventArgs e)
@@ -819,6 +1036,7 @@ public partial class MainWindow : Window
         await SaveConfigAsync(updated);
         _appRules.Remove(row);
         RefreshAppsFilter();
+        _ = RefreshDiscoveryAfterRulesChangedAsync();
     }
 
     private void ApplyConfigToUi(AppConfiguration cfg)
@@ -1316,7 +1534,98 @@ public partial class MainWindow : Window
         };
     }
 
+    private void OnTestCenterScrollPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.OriginalSource is DependencyObject src && IsDescendantOf(src, RealAppFlowGrid))
+        {
+            return;
+        }
+
+        if (sender is ScrollViewer scrollViewer)
+        {
+            scrollViewer.ScrollToVerticalOffset(scrollViewer.VerticalOffset - e.Delta);
+            e.Handled = true;
+        }
+    }
+
+    private static bool IsDescendantOf(DependencyObject? child, DependencyObject ancestor)
+    {
+        while (child != null)
+        {
+            if (child == ancestor)
+            {
+                return true;
+            }
+
+            child = VisualTreeHelper.GetParent(child);
+        }
+
+        return false;
+    }
+
     private void OnClearDiagLog(object sender, RoutedEventArgs e) => DiagResults.Items.Clear();
+
+    private void OnClearTestCenterResult(object sender, RoutedEventArgs e)
+    {
+        DiagResultDetailBox.Clear();
+        DiagResultHeadline.Text = "Результат последней проверки";
+        DiagResultPanel.BorderBrush = System.Windows.Media.Brushes.LightGray;
+        DiagResultPanel.BorderThickness = new Thickness(1);
+    }
+
+    private void OnCopyTestCenterResult(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(DiagResultDetailBox.Text))
+        {
+            return;
+        }
+
+        System.Windows.Clipboard.SetText(string.IsNullOrEmpty(_lastDiagRaw) ? DiagResultDetailBox.Text : _lastDiagRaw);
+    }
+
+    private void OnExpandTestCenterResult(object sender, RoutedEventArgs e)
+    {
+        var wrapToggle = new System.Windows.Controls.CheckBox
+        {
+            Content = "Перенос строк",
+            IsChecked = true,
+            Margin = new Thickness(0, 0, 0, 8),
+        };
+        var viewer = new TextBox
+        {
+            Text = DiagResultDetailBox.Text,
+            IsReadOnly = true,
+            FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+            FontSize = 12,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        wrapToggle.Checked += (_, _) => ApplyDiagViewerWrap(viewer, true);
+        wrapToggle.Unchecked += (_, _) => ApplyDiagViewerWrap(viewer, false);
+
+        var root = new DockPanel { Margin = new Thickness(12) };
+        DockPanel.SetDock(wrapToggle, Dock.Top);
+        root.Children.Add(wrapToggle);
+        root.Children.Add(viewer);
+
+        var dlg = new Window
+        {
+            Title = "Результат диагностики",
+            Width = 960,
+            Height = 720,
+            Owner = this,
+            Content = root,
+        };
+        dlg.ShowDialog();
+    }
+
+    private static void ApplyDiagViewerWrap(TextBox viewer, bool wrap)
+    {
+        viewer.TextWrapping = wrap ? TextWrapping.Wrap : TextWrapping.NoWrap;
+        viewer.HorizontalScrollBarVisibility = wrap ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
+    }
 
     private void OnCopyDiagLog(object sender, RoutedEventArgs e)
     {
@@ -1325,7 +1634,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        string text = string.Join(Environment.NewLine, DiagResults.Items.Cast<object>().Select(i => i.ToString() ?? ""));
+        string text = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            DiagResults.Items.Cast<object>().Select(i => i switch
+            {
+                DiagJournalEntry entry => entry.Display,
+                _ => i.ToString() ?? string.Empty,
+            }));
         System.Windows.Clipboard.SetText(text);
     }
 
@@ -1685,6 +2000,13 @@ public partial class MainWindow : Window
         DockPanel.SetDock(ok, Dock.Bottom);
         return w.ShowDialog() == true ? result : null;
     }
+}
+
+internal sealed class DiagJournalEntry(string raw, string display)
+{
+    public string Raw { get; } = raw;
+    public string Display { get; } = display;
+    public override string ToString() => Display;
 }
 
 public sealed class RuleRow : INotifyPropertyChanged

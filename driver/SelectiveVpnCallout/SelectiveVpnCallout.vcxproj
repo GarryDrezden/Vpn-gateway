@@ -39,8 +39,8 @@
   <PropertyGroup>
     <TargetName>SelectiveVpnCallout</TargetName>
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
-    <OutDir>$(ProjectDir)..\..\artifacts\driver\$(Configuration)\</OutDir>
-    <IntDir>$(ProjectDir)..\..\artifacts\driver\obj\$(Configuration)\</IntDir>
+    <OutDir>$(ProjectDir)..\..\artifacts\driver\staging\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\..\artifacts\driver\obj\staging\$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SelectiveVpnRouter.Core.ApplicationDiscovery;
 
 namespace SelectiveVpnRouter.Core;
 
@@ -139,8 +140,48 @@ public static class ApplicationRulesHelper
             && string.Equals(NormalizeExePath(r.Target), normalized, StringComparison.OrdinalIgnoreCase));
     }
 
+    public static RoutingRule? FindApplicationRuleByPackagedBinding(
+        IEnumerable<RoutingRule> rules,
+        PackagedApplicationBinding binding) =>
+        rules.FirstOrDefault(r =>
+            r.Type == RuleType.Application
+            && r.PackagedBinding is not null
+            && PackagedApplicationRuleIdentity.AreSameLogicalApplication(r.PackagedBinding, binding));
+
+    public static RoutingRule? FindApplicationRuleForDiscoveredApp(
+        IEnumerable<RoutingRule> rules,
+        DiscoveredApplication application)
+    {
+        if (TryCreateBindingFromDiscovery(application, out PackagedApplicationBinding? binding)
+            && binding is not null)
+        {
+            RoutingRule? byBinding = FindApplicationRuleByPackagedBinding(rules, binding);
+            if (byBinding is not null)
+            {
+                return byBinding;
+            }
+        }
+
+        return FindApplicationRuleByPath(rules, application.ExecutablePath);
+    }
+
     public static bool IsDuplicateApplicationRule(IEnumerable<RoutingRule> rules, string exePath) =>
         FindApplicationRuleByPath(rules, exePath) is not null;
+
+    public static bool IsDuplicateApplicationRule(
+        IEnumerable<RoutingRule> rules,
+        string exePath,
+        PackagedApplicationBinding? packagedBinding)
+    {
+        if (packagedBinding is not null
+            && PackagedApplicationRuleIdentity.HasStableBinding(packagedBinding)
+            && FindApplicationRuleByPackagedBinding(rules, packagedBinding) is not null)
+        {
+            return true;
+        }
+
+        return IsDuplicateApplicationRule(rules, exePath);
+    }
 
     public static string ResolveFriendlyAppName(string exePath)
     {
@@ -176,11 +217,20 @@ public static class ApplicationRulesHelper
     }
 
     /// <summary>Unified display name for flows (Home, Connections). Does not affect path matching.</summary>
-    public static string ResolveFlowApplicationDisplayName(FlowEvent flow)
+    public static string ResolveFlowApplicationDisplayName(
+        FlowEvent flow,
+        PackagedRoutingTargetIndex? packagedRoutingIndex = null)
     {
         if (!string.IsNullOrWhiteSpace(flow.RuleName))
         {
             return flow.RuleName.Trim();
+        }
+
+        if (packagedRoutingIndex?.TryGetLogicalRule(flow.ProcessPath, out RoutingRule? logicalRule, out _) == true
+            && logicalRule is not null
+            && !string.IsNullOrWhiteSpace(logicalRule.Name))
+        {
+            return logicalRule.Name.Trim();
         }
 
         if (!string.IsNullOrWhiteSpace(flow.ProcessPath))
@@ -213,14 +263,129 @@ public static class ApplicationRulesHelper
             return ApplicationRuleAddResult.Fail("File not found: " + normalized);
         }
 
-        if (IsDuplicateApplicationRule(config.Rules, normalized))
+        PackagedApplicationBinding? binding = TryCreateBindingFromExecutablePath(normalized);
+        if (IsDuplicateApplicationRule(config.Rules, normalized, binding))
         {
             return ApplicationRuleAddResult.Duplicate(normalized);
         }
 
         string displayName = ResolveFriendlyAppName(normalized);
-        RoutingRule rule = RoutingRule.Create(RuleType.Application, displayName, normalized, defaultMode);
+        RoutingRule rule = CreateApplicationRule(displayName, normalized, defaultMode, binding);
         return ApplicationRuleAddResult.Success(config with { Rules = config.Rules.Concat([rule]).ToList() }, rule);
+    }
+
+    public static ApplicationRuleAddResult TryAddApplicationRuleFromDiscovery(
+        AppConfiguration config,
+        DiscoveredApplication application,
+        RouteMode defaultMode = RouteMode.Vpn)
+    {
+        if (string.IsNullOrWhiteSpace(application.ExecutablePath))
+        {
+            return ApplicationRuleAddResult.Fail("Path required.");
+        }
+
+        string normalized;
+        try
+        {
+            normalized = NormalizeExePath(application.ExecutablePath);
+        }
+        catch (Exception ex)
+        {
+            return ApplicationRuleAddResult.Fail("Invalid path: " + ex.Message);
+        }
+
+        if (!File.Exists(normalized))
+        {
+            return ApplicationRuleAddResult.Fail("File not found: " + normalized);
+        }
+
+        PackagedApplicationBinding? binding = null;
+        if (TryCreateBindingFromDiscovery(application, out PackagedApplicationBinding? fromDiscovery))
+        {
+            binding = fromDiscovery;
+        }
+        else
+        {
+            binding = TryCreateBindingFromExecutablePath(normalized);
+        }
+
+        if (IsDuplicateApplicationRule(config.Rules, normalized, binding))
+        {
+            return ApplicationRuleAddResult.Duplicate(normalized);
+        }
+
+        string displayName = string.IsNullOrWhiteSpace(application.DisplayName)
+            ? ResolveFriendlyAppName(normalized)
+            : application.DisplayName.Trim();
+        RoutingRule rule = CreateApplicationRule(displayName, normalized, defaultMode, binding);
+        return ApplicationRuleAddResult.Success(config with { Rules = config.Rules.Concat([rule]).ToList() }, rule);
+    }
+
+    public static bool TryCreateBindingFromDiscovery(
+        DiscoveredApplication application,
+        out PackagedApplicationBinding? binding)
+    {
+        binding = null;
+        PackagedApplicationIdentity? identity = application.PackageIdentity;
+        if (identity?.HasStablePackageIdentity != true)
+        {
+            return false;
+        }
+
+        string? userSid = InteractiveUserSid.TryGetCurrent();
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            return false;
+        }
+
+        binding = new PackagedApplicationBinding
+        {
+            PackageFamilyName = identity.PackageFamilyName!,
+            ApplicationId = identity.ApplicationId!,
+            RelativeExecutablePath = identity.RelativeExecutablePath,
+            UserSid = userSid,
+            ResolvedPackageFullName = identity.PackageFullName,
+        };
+        return true;
+    }
+
+    internal static PackagedApplicationBinding? TryCreateBindingFromExecutablePath(string normalizedExecutablePath)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        PackagedApplicationIdentity? identity = WindowsAppsPackageIdentityResolver.TryResolveFromExecutable(normalizedExecutablePath);
+        if (identity?.HasStablePackageIdentity != true)
+        {
+            return null;
+        }
+
+        string? userSid = InteractiveUserSid.TryGetCurrent();
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            return null;
+        }
+
+        return new PackagedApplicationBinding
+        {
+            PackageFamilyName = identity.PackageFamilyName!,
+            ApplicationId = identity.ApplicationId!,
+            RelativeExecutablePath = identity.RelativeExecutablePath,
+            UserSid = userSid,
+            ResolvedPackageFullName = identity.PackageFullName,
+        };
+    }
+
+    private static RoutingRule CreateApplicationRule(
+        string displayName,
+        string normalizedExecutablePath,
+        RouteMode mode,
+        PackagedApplicationBinding? packagedBinding)
+    {
+        RoutingRule rule = RoutingRule.Create(RuleType.Application, displayName, normalizedExecutablePath, mode);
+        return packagedBinding is null ? rule : rule with { PackagedBinding = packagedBinding };
     }
 
     public static AppConfiguration? TrySetApplicationRouteMode(AppConfiguration config, Guid ruleId, RouteMode mode)

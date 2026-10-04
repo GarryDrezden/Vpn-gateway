@@ -73,6 +73,7 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
                 bool shortFallback = IsShortPathFallback(displayPath, identityPath);
                 if (_driverPresent)
                 {
+                    results.Add(InstallAppLoopbackPermitFilter(identityPath, displayPath, shortFallback));
                     results.Add(InstallAppCalloutFilter(identityPath, displayPath, shortFallback));
                 }
 
@@ -83,14 +84,19 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
             }
         }
 
-        int installedCallout = results.Count(r => r.IsCalloutFilter && r.FilterInstalled);
-        bool eachAppHasCallout = exePaths.All(exe =>
+        int installedCallout = results.Count(r => r.Role == WfpFilterRole.RedirectCallout && r.FilterInstalled);
+        bool eachAppReady = exePaths.All(exe =>
         {
             string display = WfpAppIdentity.GetDisplayPath(exe);
-            return results.Any(r =>
-                r.IsCalloutFilter
+            bool redirect = results.Any(r =>
+                r.Role == WfpFilterRole.RedirectCallout
                 && r.FilterInstalled
                 && string.Equals(r.ExePath, display, StringComparison.OrdinalIgnoreCase));
+            bool loopback = results.Any(r =>
+                r.Role == WfpFilterRole.LoopbackPermitV4
+                && r.FilterInstalled
+                && string.Equals(r.ExePath, display, StringComparison.OrdinalIgnoreCase));
+            return redirect && loopback;
         });
 
         var apply = new WfpPolicyApplyResult
@@ -100,8 +106,8 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
             InstalledAppFilters = installedCallout,
             DriverPresent = _driverPresent,
             SessionOpen = _engine != IntPtr.Zero,
-            PolicyHealthy = exePaths.Count == 0 || eachAppHasCallout,
-            LastError = BuildLastError(exePaths, eachAppHasCallout, results),
+            PolicyHealthy = exePaths.Count == 0 || eachAppReady,
+            LastError = BuildLastError(exePaths, eachAppReady, results),
         };
         return apply;
     }
@@ -137,17 +143,19 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
 
     private static string? BuildLastError(
         IReadOnlyList<string> requestedPaths,
-        bool eachAppHasCallout,
+        bool eachAppReady,
         IReadOnlyList<WfpFilterInstallResult> results)
     {
-        if (requestedPaths.Count == 0 || eachAppHasCallout)
+        if (requestedPaths.Count == 0 || eachAppReady)
         {
             return null;
         }
 
-        WfpFilterInstallResult? failed = results.FirstOrDefault(r => r.IsCalloutFilter && !r.FilterInstalled);
+        WfpFilterInstallResult? failed = results.FirstOrDefault(r =>
+            (r.Role == WfpFilterRole.RedirectCallout || r.Role == WfpFilterRole.LoopbackPermitV4)
+            && !r.FilterInstalled);
         return failed is null
-            ? "At least one VPN app has no installed callout filter."
+            ? "At least one VPN app is missing redirect and/or loopback permit WFP filters."
             : WfpPolicyHealth.FormatFilterLine(failed);
     }
 
@@ -518,7 +526,58 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
             },
             "SVR app redirect ",
             "Per-process TCP redirect",
-            isCalloutFilter: true);
+            isCalloutFilter: true,
+            role: WfpFilterRole.RedirectCallout,
+            weight: WfpVpnAppFilterPlanner.RedirectCalloutFilterWeight,
+            extraConditions: null);
+
+    private WfpFilterInstallResult InstallAppLoopbackPermitFilter(string identityPath, string displayExePath, bool shortFallback)
+    {
+        IntPtr v4MaskPtr = IntPtr.Zero;
+        try
+        {
+            v4MaskPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FWP_V4_ADDR_AND_MASK0>());
+            var v4 = new FWP_V4_ADDR_AND_MASK0
+            {
+                addr = WfpLoopbackIpv4.PermitNetworkAddress,
+                mask = WfpLoopbackIpv4.PermitNetworkMask,
+            };
+            Marshal.StructureToPtr(v4, v4MaskPtr, false);
+            FWPM_FILTER_CONDITION0[] extra =
+            [
+                BuildRuntimeCaptureUint8Condition(WfpConstants.ConditionIpProtocol, 6),
+                new FWPM_FILTER_CONDITION0
+                {
+                    fieldKey = WfpConstants.ConditionIpRemoteAddress,
+                    matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+                    conditionValue = new FWP_CONDITION_VALUE0
+                    {
+                        type = FWP_DATA_TYPE.FWP_V4_ADDR_MASK,
+                        value = new FWP_VALUE0_UNION { ptr = v4MaskPtr },
+                    },
+                },
+            ];
+            return InstallAppFilter(
+                identityPath,
+                displayExePath,
+                shortFallback,
+                LayerConnectRedirectV4,
+                new FWPM_ACTION0 { type = FWP_ACTION_TYPE.FWP_ACTION_PERMIT },
+                "SVR app loopback ",
+                "127.0.0.0/8 PERMIT before redirect callout",
+                isCalloutFilter: false,
+                role: WfpFilterRole.LoopbackPermitV4,
+                weight: WfpVpnAppFilterPlanner.LoopbackPermitFilterWeight,
+                extraConditions: extra);
+        }
+        finally
+        {
+            if (v4MaskPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(v4MaskPtr);
+            }
+        }
+    }
 
     private WfpFilterInstallResult InstallIpv6BlockFilter(string identityPath, string displayExePath, bool shortFallback)
         => InstallAppFilter(
@@ -533,7 +592,10 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
             },
             "SVR IPv6 block ",
             "Prevent IPv6 leak for VPN-routed app",
-            isCalloutFilter: false);
+            isCalloutFilter: false,
+            role: WfpFilterRole.Ipv6Block,
+            weight: 0,
+            extraConditions: null);
 
     private WfpFilterInstallResult InstallAppFilter(
         string identityPath,
@@ -543,7 +605,10 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
         FWPM_ACTION0 action,
         string namePrefix,
         string description,
-        bool isCalloutFilter)
+        bool isCalloutFilter,
+        WfpFilterRole role,
+        ulong weight,
+        FWPM_FILTER_CONDITION0[]? extraConditions)
     {
         string fileCheckPath = File.Exists(identityPath) ? identityPath : displayExePath;
         if (!File.Exists(fileCheckPath))
@@ -584,8 +649,25 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
                 AppIdResolved = true,
                 AppIdStatus = 0,
                 IsCalloutFilter = isCalloutFilter,
+                Role = role,
+                FilterWeight = weight,
             };
-            return AddFilter(displayExePath, layer, action, namePrefix, description, ownedBlob!.BlobPointer, isCalloutFilter, seed);
+
+            var conditions = new List<FWPM_FILTER_CONDITION0>
+            {
+                new()
+                {
+                    fieldKey = ConditionAleAppId,
+                    matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+                    conditionValue = FWP_CONDITION_VALUE0.FromByteBlobPointer(ownedBlob!.BlobPointer),
+                },
+            };
+            if (extraConditions is { Length: > 0 })
+            {
+                conditions.AddRange(extraConditions);
+            }
+
+            return AddFilter(displayExePath, layer, action, namePrefix, description, conditions, weight, seed);
         }
     }
 
@@ -595,22 +677,22 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
         FWPM_ACTION0 action,
         string namePrefix,
         string description,
-        IntPtr appIdBlobPtr,
-        bool isCalloutFilter,
+        IReadOnlyList<FWPM_FILTER_CONDITION0> conditions,
+        ulong weightValue,
         WfpFilterInstallResult seed)
     {
         Guid filterKey = Guid.NewGuid();
-        IntPtr condMem = IntPtr.Zero;
+        IntPtr condBlock = IntPtr.Zero;
         IntPtr providerKeyPtr = IntPtr.Zero;
         IntPtr filterMem = IntPtr.Zero;
+        IntPtr weightPtr = IntPtr.Zero;
         try
         {
-            var conditionValue = FWP_CONDITION_VALUE0.FromByteBlobPointer(appIdBlobPtr);
             WfpAppIdConditionValidation validation = WfpAppIdConditionDiagnostics.ValidateAppIdCondition(
                 ConditionAleAppId,
                 (uint)FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
-                (uint)conditionValue.type,
-                appIdBlobPtr);
+                (uint)FWP_DATA_TYPE.FWP_BYTE_BLOB_TYPE,
+                conditions[0].conditionValue.value.byteBlob);
             if (!validation.IsValid)
             {
                 return seed with
@@ -621,17 +703,27 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
                 };
             }
 
-            var cond = new FWPM_FILTER_CONDITION0
+            int condSize = Marshal.SizeOf<FWPM_FILTER_CONDITION0>();
+            condBlock = Marshal.AllocHGlobal(condSize * conditions.Count);
+            for (int i = 0; i < conditions.Count; i++)
             {
-                fieldKey = ConditionAleAppId,
-                matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
-                conditionValue = conditionValue,
-            };
-            condMem = Marshal.AllocHGlobal(Marshal.SizeOf<FWPM_FILTER_CONDITION0>());
-            Marshal.StructureToPtr(cond, condMem, false);
+                Marshal.StructureToPtr(conditions[i], IntPtr.Add(condBlock, i * condSize), false);
+            }
 
             providerKeyPtr = Marshal.AllocHGlobal(Marshal.SizeOf<Guid>());
             Marshal.StructureToPtr(ProviderKey, providerKeyPtr, false);
+
+            FWP_VALUE0 weight = FWP_VALUE0.Empty;
+            if (weightValue > 0)
+            {
+                weightPtr = Marshal.AllocHGlobal(8);
+                Marshal.WriteInt64(weightPtr, (long)weightValue);
+                weight = new FWP_VALUE0
+                {
+                    type = FWP_DATA_TYPE.FWP_UINT64,
+                    value = new FWP_VALUE0_UNION { uint64 = weightPtr },
+                };
+            }
 
             var filter = default(FWPM_FILTER0);
             filter.filterKey = filterKey;
@@ -644,9 +736,17 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
             filter.layerKey = layer;
             filter.subLayerKey = SublayerKey;
             filter.action = action;
-            filter.numFilterConditions = 1;
-            filter.filterCondition = condMem;
-            filter.weight = FWP_VALUE0.Empty;
+            filter.numFilterConditions = (uint)conditions.Count;
+            filter.filterCondition = condBlock;
+            filter.weight = weight;
+
+            uint actionType = (uint)action.type;
+            string addContext = WfpActionDiagnostics.FormatFilterAddContext(
+                actionType,
+                layer,
+                SublayerKey,
+                weightValue,
+                seed.Role);
 
             filterMem = Marshal.AllocHGlobal(Marshal.SizeOf<FWPM_FILTER0>());
             Marshal.StructureToPtr(filter, filterMem, false);
@@ -660,7 +760,7 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
 
             string? error = installed
                 ? null
-                : "FwpmFilterAdd0 failed: " + WfpNativeStatus.Describe(filterAddStatus) + " " + validation.DiagnosticLine;
+                : "FwpmFilterAdd0 failed: " + WfpNativeStatus.Describe(filterAddStatus) + " " + addContext + " " + validation.DiagnosticLine;
 
             return seed with
             {
@@ -668,7 +768,8 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
                 FilterInstalled = installed,
                 FilterAddStatus = filterAddStatus,
                 FilterId = filterId,
-                IsCalloutFilter = isCalloutFilter,
+                ActionType = actionType,
+                FilterAddContext = addContext,
                 Error = error,
             };
         }
@@ -680,9 +781,19 @@ public sealed class WfpSession : IWfpAppFilterInstaller, IWfpRuntimeCaptureFilte
                 Marshal.FreeHGlobal(filterMem);
             }
 
-            if (condMem != IntPtr.Zero)
+            if (condBlock != IntPtr.Zero)
             {
-                Marshal.FreeHGlobal(condMem);
+                for (int i = 0; i < conditions.Count; i++)
+                {
+                    Marshal.DestroyStructure<FWPM_FILTER_CONDITION0>(IntPtr.Add(condBlock, i * Marshal.SizeOf<FWPM_FILTER_CONDITION0>()));
+                }
+
+                Marshal.FreeHGlobal(condBlock);
+            }
+
+            if (weightPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(weightPtr);
             }
 
             if (providerKeyPtr != IntPtr.Zero)

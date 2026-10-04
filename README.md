@@ -62,6 +62,20 @@ Connect/disconnect/reconnect cleanup, routing after second reconnect, clean disc
 
 Technical note: [docs/vpn-lifecycle-stability.md](docs/vpn-lifecycle-stability.md)
 
+### Milestone 6 — `application-discovery-routing-pass-v1`
+
+Application rules UX, MSIX discovery, packaged stable binding, helper routing targets, localhost OAuth preservation, diagnostics UX, dev publish/driver lifecycle hardening.
+
+- **Application Discovery V1:** inner tabs (Routing / Installed / Running); Start Menu, App Paths, Uninstall registry, packaged `AppxManifest`; search, icons, batch add; helpers filtered from Installed list.
+- **Packaged binding:** `PackagedBinding` on rules (PFN + ApplicationId + user SID); rebind on load/save/policy refresh; associated manifest helpers share VPN WFP filters with one logical UI row (e.g. ChatGPT).
+- **Loopback:** per VPN app target, high-weight `127.0.0.0/8` TCP PERMIT at `ALE_CONNECT_REDIRECT_V4` before redirect callout; `FWP_ACTION_PERMIT = 0x00001002`; Test Center **OAuth localhost** PASS.
+- **Diagnostics:** Test Center categories, pinned result pane, Journal wrapping, UTF-8 probe/service output, **Packaged routing targets** diagnostic.
+- **Dev:** driver builds to isolated staging; canonical runtime driver under publish layout; deploy/rollback scripts (see scripts).
+
+Known limitation: ChatGPT/Codex OAuth **token exchange** may still return region 403 under selective routing despite primary/helper WFP coverage — see [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
+
+Prior portable milestone: tag `portable-bootstrap-pass-v1` (commit `0870c387`).
+
 ### Verified now (TCP IPv4)
 
 - Per-process connect-redirect for selected `.exe` processes (ASCII and Unicode paths)

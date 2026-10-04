@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using SelectiveVpnRouter.Core;
 using static SelectiveVpnRouter.Network.WfpNativeTypes;
 
 namespace SelectiveVpnRouter.Network;
@@ -139,6 +140,213 @@ public static class WfpAppIdSmokeTest
             if (providerKeyPtr != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(providerKeyPtr);
+            }
+
+            if (appIdPtr != IntPtr.Zero)
+            {
+                Native.FwpmFreeMemory0(ref appIdPtr);
+            }
+
+            if (engine != IntPtr.Zero)
+            {
+                Native.FwpmEngineClose0(engine);
+            }
+        }
+    }
+}
+
+public sealed record WfpLoopbackPermitSmokeResult(
+    bool Success,
+    uint FilterAddStatus,
+    ulong FilterId,
+    uint ActionTypeUsed,
+    string DiagnosticLine,
+    string? Error);
+
+public static class WfpLoopbackPermitFilterSmokeTest
+{
+    public static WfpLoopbackPermitSmokeResult Run(string? exePath = null)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return new WfpLoopbackPermitSmokeResult(false, 0, 0, 0, string.Empty, "Windows only.");
+        }
+
+        exePath ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe");
+        if (!File.Exists(exePath))
+        {
+            return new WfpLoopbackPermitSmokeResult(false, 0, 0, 0, string.Empty, "Executable not found: " + exePath);
+        }
+
+        uint actionType = WfpActionConstants.FwpActionPermit;
+        IntPtr engine = IntPtr.Zero;
+        IntPtr appIdPtr = IntPtr.Zero;
+        IntPtr condBlock = IntPtr.Zero;
+        IntPtr v4MaskPtr = IntPtr.Zero;
+        IntPtr providerKeyPtr = IntPtr.Zero;
+        IntPtr filterMem = IntPtr.Zero;
+        IntPtr weightPtr = IntPtr.Zero;
+        Guid providerKey = Guid.NewGuid();
+        Guid subLayerKey = Guid.NewGuid();
+        Guid filterKey = Guid.NewGuid();
+
+        try
+        {
+            var session = new FWPM_SESSION0 { flags = 1 };
+            uint st = Native.FwpmEngineOpen0(null, 10, IntPtr.Zero, ref session, out engine);
+            if (st != 0)
+            {
+                return new WfpLoopbackPermitSmokeResult(false, st, 0, actionType, string.Empty, "FwpmEngineOpen0 0x" + st.ToString("X"));
+            }
+
+            var provider = new FWPM_PROVIDER0
+            {
+                providerKey = providerKey,
+                displayData = new FWPM_DISPLAY_DATA0 { name = "SVR loopback permit smoke", description = "temporary" },
+            };
+            st = Native.FwpmProviderAdd0(engine, ref provider, IntPtr.Zero);
+            if (st != 0 && st != 0x80320016)
+            {
+                return new WfpLoopbackPermitSmokeResult(false, st, 0, actionType, string.Empty, "FwpmProviderAdd0 0x" + st.ToString("X"));
+            }
+
+            providerKeyPtr = Marshal.AllocHGlobal(Marshal.SizeOf<Guid>());
+            Marshal.StructureToPtr(providerKey, providerKeyPtr, false);
+
+            var sub = new FWPM_SUBLAYER0
+            {
+                subLayerKey = subLayerKey,
+                displayData = new FWPM_DISPLAY_DATA0 { name = "SVR loopback smoke sub", description = "" },
+                providerKey = providerKeyPtr,
+                weight = 0x7FFF,
+            };
+            st = Native.FwpmSubLayerAdd0(engine, ref sub, IntPtr.Zero);
+            if (st != 0 && st != 0x80320016)
+            {
+                return new WfpLoopbackPermitSmokeResult(false, st, 0, actionType, string.Empty, "FwpmSubLayerAdd0 0x" + st.ToString("X"));
+            }
+
+            st = Native.FwpmGetAppIdFromFileName0(exePath, out appIdPtr);
+            if (st != 0 || appIdPtr == IntPtr.Zero)
+            {
+                return new WfpLoopbackPermitSmokeResult(false, st, 0, actionType, string.Empty, "FwpmGetAppIdFromFileName0 0x" + st.ToString("X"));
+            }
+
+            v4MaskPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FWP_V4_ADDR_AND_MASK0>());
+            var v4 = new FWP_V4_ADDR_AND_MASK0
+            {
+                addr = WfpLoopbackIpv4.PermitNetworkAddress,
+                mask = WfpLoopbackIpv4.PermitNetworkMask,
+            };
+            Marshal.StructureToPtr(v4, v4MaskPtr, false);
+
+            FWPM_FILTER_CONDITION0[] conditions =
+            [
+                new()
+                {
+                    fieldKey = WfpConstants.ConditionAleAppId,
+                    matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+                    conditionValue = FWP_CONDITION_VALUE0.FromByteBlobPointer(appIdPtr),
+                },
+                new()
+                {
+                    fieldKey = WfpConstants.ConditionIpProtocol,
+                    matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+                    conditionValue = new FWP_CONDITION_VALUE0
+                    {
+                        type = FWP_DATA_TYPE.FWP_UINT8,
+                        value = new FWP_VALUE0_UNION { uint8 = 6 },
+                    },
+                },
+                new()
+                {
+                    fieldKey = WfpConstants.ConditionIpRemoteAddress,
+                    matchType = FWP_MATCH_TYPE.FWP_MATCH_EQUAL,
+                    conditionValue = new FWP_CONDITION_VALUE0
+                    {
+                        type = FWP_DATA_TYPE.FWP_V4_ADDR_MASK,
+                        value = new FWP_VALUE0_UNION { ptr = v4MaskPtr },
+                    },
+                },
+            ];
+
+            int condSize = Marshal.SizeOf<FWPM_FILTER_CONDITION0>();
+            condBlock = Marshal.AllocHGlobal(condSize * conditions.Length);
+            for (int i = 0; i < conditions.Length; i++)
+            {
+                Marshal.StructureToPtr(conditions[i], IntPtr.Add(condBlock, i * condSize), false);
+            }
+
+            string ctx = WfpActionDiagnostics.FormatFilterAddContext(
+                actionType,
+                WfpSession.LayerConnectRedirectV4,
+                subLayerKey,
+                WfpVpnAppFilterPlanner.LoopbackPermitFilterWeight,
+                WfpFilterRole.LoopbackPermitV4);
+
+            var filter = default(FWPM_FILTER0);
+            filter.filterKey = filterKey;
+            filter.displayData = new FWPM_DISPLAY_DATA0 { name = "SVR loopback permit smoke", description = "127/8 PERMIT" };
+            filter.providerKey = providerKeyPtr;
+            filter.layerKey = WfpSession.LayerConnectRedirectV4;
+            filter.subLayerKey = subLayerKey;
+            filter.action = new FWPM_ACTION0 { type = FWP_ACTION_TYPE.FWP_ACTION_PERMIT };
+            filter.numFilterConditions = (uint)conditions.Length;
+            filter.filterCondition = condBlock;
+
+            ulong weightValue = WfpVpnAppFilterPlanner.LoopbackPermitFilterWeight;
+            weightPtr = Marshal.AllocHGlobal(8);
+            Marshal.WriteInt64(weightPtr, (long)weightValue);
+            filter.weight = new FWP_VALUE0
+            {
+                type = FWP_DATA_TYPE.FWP_UINT64,
+                value = new FWP_VALUE0_UNION { uint64 = weightPtr },
+            };
+
+            filterMem = Marshal.AllocHGlobal(Marshal.SizeOf<FWPM_FILTER0>());
+            Marshal.StructureToPtr(filter, filterMem, false);
+
+            st = Native.FwpmFilterAdd0(engine, filterMem, IntPtr.Zero, out ulong filterId);
+            bool ok = st == 0 && filterId != 0;
+            if (ok)
+            {
+                Native.FwpmFilterDeleteByKey0(engine, ref filterKey);
+            }
+
+            return new WfpLoopbackPermitSmokeResult(
+                ok,
+                st,
+                filterId,
+                actionType,
+                ctx,
+                ok ? null : "FwpmFilterAdd0 failed: " + WfpNativeStatus.Describe(st) + " " + ctx);
+        }
+        finally
+        {
+            if (filterMem != IntPtr.Zero)
+            {
+                Marshal.DestroyStructure<FWPM_FILTER0>(filterMem);
+                Marshal.FreeHGlobal(filterMem);
+            }
+
+            if (condBlock != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(condBlock);
+            }
+
+            if (v4MaskPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(v4MaskPtr);
+            }
+
+            if (providerKeyPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(providerKeyPtr);
+            }
+
+            if (weightPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(weightPtr);
             }
 
             if (appIdPtr != IntPtr.Zero)

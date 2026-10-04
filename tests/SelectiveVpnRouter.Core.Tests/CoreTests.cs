@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Core.Portable;
 using SelectiveVpnRouter.Network;
 using Xunit;
 
@@ -728,4 +729,311 @@ public class WindowsUnicastAddressCatalogRegressionTests
         Assert.True(VpnAdapterReadiness.TrySelectBest([candidate], "10.28.0.1", "10.28.0.7", [], out VpnAdapterSelection? sel, out _));
         Assert.Equal(9, sel!.IfIndex);
     }
+}
+
+public class DiagnosticUiExposureTests
+{
+    private static string RepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "SelectiveVpnRouter.sln")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException("Repo root not found.");
+    }
+
+    [Fact]
+    public void Test_center_exposes_loopback_local_callback_diagnostic()
+    {
+        string root = RepoRoot();
+        string xaml = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.App", "MainWindow.xaml"));
+        string service = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.Service", "DriverAndIsolationTests.cs"));
+        Assert.Contains("Tag=\"loopback-local-callback\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("\"loopback-local-callback\" =>", service, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Deploy_callout_driver_script_always_prints_console_banner()
+    {
+        string root = RepoRoot();
+        string script = File.ReadAllText(Path.Combine(root, "scripts", "deploy-callout-driver.ps1"));
+        Assert.Contains("Write-DeployConsole", script, StringComparison.Ordinal);
+        Assert.Contains("PASS already deployed", script, StringComparison.Ordinal);
+        Assert.Contains("=== VPN Route callout deploy ===", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("Write-DeployCalloutLine", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Callout_loopback_bypass_uses_permit_writable_helper()
+    {
+        string root = RepoRoot();
+        string callout = File.ReadAllText(Path.Combine(root, "driver", "SelectiveVpnCallout", "callout.c"));
+        int bypassIdx = callout.IndexOf("gLoopbackDestinationBypass", StringComparison.Ordinal);
+        Assert.True(bypassIdx >= 0);
+        string segment = callout[bypassIdx..Math.Min(bypassIdx + 400, callout.Length)];
+        Assert.Contains("SvrPermitWritableConnectWithoutRedirect", segment, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Loopback_diagnostic_enforces_wfp_control_before_loopback_probe()
+    {
+        string root = RepoRoot();
+        string service = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.Service", "DriverAndIsolationTests.cs"));
+        Assert.Contains("WfpPolicyHealth.FindCalloutFilter(wfpPolicy, probeExe)", service, StringComparison.Ordinal);
+        Assert.Contains("WfpPolicyHealth.FindLoopbackPermitFilter(wfpPolicy, probeExe)", service, StringComparison.Ordinal);
+        Assert.Contains("WfpPolicyHealth.IsVpnAppWfpReady(wfpPolicy, probeExe)", service, StringComparison.Ordinal);
+        Assert.Contains("CONTROL FAIL: VPN-routed Probe external HTTP did not prove WFP redirect", service, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Wfp_session_installs_loopback_permit_before_redirect_callout()
+    {
+        string root = RepoRoot();
+        string wfp = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.Network", "WfpSession.cs"));
+        Assert.Contains("InstallAppLoopbackPermitFilter", wfp, StringComparison.Ordinal);
+        Assert.Contains("FWP_ACTION_PERMIT", wfp, StringComparison.Ordinal);
+        Assert.Contains("WfpLoopbackIpv4.PermitNetworkAddress", wfp, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MainWindow_read_only_projection_bindings_use_one_way_mode()
+    {
+        string root = RepoRoot();
+        string xaml = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.App", "MainWindow.xaml"));
+        Assert.Contains("DisplayStateLabel, Mode=OneWay", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"{Binding DisplayStateLabel}\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Diagnostics_page_uses_inner_tabs_not_stacked_openvpn_and_result()
+    {
+        string root = RepoRoot();
+        string xaml = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.App", "MainWindow.xaml"));
+        Assert.Contains("x:Name=\"DiagInnerTabs\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Test Center\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"DiagResultDetailBox\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("OnCopyTestCenterResult", xaml, StringComparison.Ordinal);
+        Assert.Contains("OnExpandTestCenterResult", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Test_center_has_root_scroll_and_category_tabs()
+    {
+        string root = RepoRoot();
+        string xaml = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.App", "MainWindow.xaml"));
+        Assert.Contains("x:Name=\"TestCenterScrollViewer\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TestCenterCategoryTabs\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Базовые\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Маршрутизация\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Драйвер и WFP\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Инструменты\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Tag=\"loopback-local-callback\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Header=\"Дополнительные параметры\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("AdvancedDiagnosticsExpander", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Diagnostic_result_viewer_uses_wrap_not_horizontal_scroll()
+    {
+        string root = RepoRoot();
+        string xaml = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.App", "MainWindow.xaml"));
+        Assert.Contains("x:Name=\"DiagResultDetailBox\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TextWrapping=\"Wrap\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HorizontalScrollBarVisibility=\"Disabled\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Diagnostic_display_formatter_structures_loopback_failure()
+    {
+        const string raw =
+            "FAIL  loopback-local-callback: CONTROL FAIL: missing filters. "
+            + "probePath=C:\\Probe.exe vpnRoutingReady=True redirectFilter=[role=RedirectCallout filterId=1] "
+            + "loopbackPermitFilter=[role=LoopbackPermitV4 filterAddStatus=0x80320024]";
+        string ui = DiagnosticDisplayFormatter.FormatForUi(raw);
+        Assert.Contains("FAIL loopback-local-callback", ui, StringComparison.Ordinal);
+        Assert.Contains("Redirect filter:", ui, StringComparison.Ordinal);
+        Assert.Contains("Loopback permit:", ui, StringComparison.Ordinal);
+        Assert.DoesNotContain("redirectFilter=[role=RedirectCallout filterId=1] loopbackPermitFilter=", ui, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Openvpn_log_is_not_embedded_in_test_center_scroll()
+    {
+        string root = RepoRoot();
+        string xaml = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.App", "MainWindow.xaml"));
+        int scrollIdx = xaml.IndexOf("TestCenterScrollViewer", StringComparison.Ordinal);
+        int openVpnTabIdx = xaml.IndexOf("Header=\"OpenVPN\"", StringComparison.Ordinal);
+        int logBoxIdx = xaml.IndexOf("x:Name=\"LogBox\"", StringComparison.Ordinal);
+        Assert.True(scrollIdx >= 0 && openVpnTabIdx > scrollIdx && logBoxIdx > openVpnTabIdx);
+    }
+
+    [Fact]
+    public void Probe_and_run_probe_use_utf8_output()
+    {
+        string root = RepoRoot();
+        string probe = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.Probe", "Program.cs"));
+        string diag = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.Service", "DriverAndIsolationTests.cs"));
+        Assert.Contains("Console.OutputEncoding = Encoding.UTF8", probe, StringComparison.Ordinal);
+        Assert.Contains("ProcessOutputEncoding.UseUtf8(psi)", diag, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Probe_logs_numeric_socket_error_codes()
+    {
+        string root = RepoRoot();
+        string probe = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.Probe", "Program.cs"));
+        Assert.Contains("NativeErrorCode=", probe, StringComparison.Ordinal);
+        Assert.Contains("FormatSocketFailure", probe, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Build_driver_script_targets_staging_not_registered_path()
+    {
+        string root = RepoRoot();
+        string script = File.ReadAllText(Path.Combine(root, "scripts", "build-driver.ps1"));
+        Assert.Contains("Get-SvrDriverStagingSysPath", script, StringComparison.Ordinal);
+        Assert.Contains("Refusing to link to registered ImagePath", script, StringComparison.Ordinal);
+        string vcx = File.ReadAllText(Path.Combine(root, "driver", "SelectiveVpnCallout", "SelectiveVpnCallout.vcxproj"));
+        Assert.Contains(@"artifacts\driver\staging\", vcx, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Deploy_callout_registers_canonical_publish_runtime_driver()
+    {
+        string root = RepoRoot();
+        string script = File.ReadAllText(Path.Combine(root, "scripts", "deploy-callout-driver.ps1"));
+        Assert.Contains("Get-SvrDriverRuntimeSysPath", script, StringComparison.Ordinal);
+        Assert.Contains("Get-SvrDriverStagingSysPath", script, StringComparison.Ordinal);
+        Assert.Contains("PASS rollback", script, StringComparison.Ordinal);
+        Assert.DoesNotContain(@"artifacts\driver\Release", script, StringComparison.Ordinal);
+    }
+}
+
+public class CalloutDriverDeployPlannerTests
+{
+    private const string PublishRoot = @"C:\dev\artifacts\publish\SelectiveVpnRouter";
+    private const string RepoRoot = @"C:\dev";
+    private const string StagedHash = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    private const string LiveHash = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
+    [Fact]
+    public void Registered_release_build_path_must_not_be_linker_output_when_live()
+    {
+        string staging = DriverBuildLayout.StagingSysPath(RepoRoot);
+        string registered = DriverBuildLayout.LegacyReleaseBuildSysPath(RepoRoot);
+        Assert.True(DriverBuildLayout.LinkerOutputMustNotTargetRegisteredImagePath(staging, registered));
+        Assert.False(DriverBuildLayout.LinkerOutputMustNotTargetRegisteredImagePath(registered, registered));
+    }
+
+    [Fact]
+    public void Build_failure_plan_does_not_stop_services()
+    {
+        Assert.True(CalloutDriverDeployPlanner.ShouldBuildWithoutStoppingServices(skipBuild: false));
+        var plan = CalloutDriverDeployPlanner.PlanDeploy(Snapshot(), skipBuild: false, calloutRunning: true, productRunning: true, DriverBuildLayout.RuntimeSysPath(PublishRoot));
+        Assert.True(plan.BuildBeforeStop);
+    }
+
+    [Fact]
+    public void Staged_build_exists_triggers_deploy_swap()
+    {
+        var plan = CalloutDriverDeployPlanner.PlanDeploy(
+            Snapshot(stagedHash: StagedHash, liveHash: LiveHash),
+            skipBuild: true,
+            calloutRunning: true,
+            productRunning: true,
+            DriverBuildLayout.RuntimeSysPath(PublishRoot));
+        Assert.True(plan.StopServicesForDeploy);
+        Assert.True(plan.CopyStagedToLiveRuntime);
+    }
+
+    [Fact]
+    public void New_equals_live_is_idempotent_pass()
+    {
+        string runtime = DriverBuildLayout.RuntimeSysPath(PublishRoot);
+        var snap = Snapshot(
+            stagedHash: StagedHash,
+            liveHash: StagedHash,
+            registeredImagePath: runtime);
+        var plan = CalloutDriverDeployPlanner.PlanDeploy(snap, skipBuild: true, calloutRunning: true, productRunning: true, runtime);
+        Assert.True(plan.IdempotentAlreadyDeployed);
+        Assert.False(CalloutDriverDeployPlanner.ShouldStopServicesForDeploy(plan));
+    }
+
+    [Fact]
+    public void Start_failure_rollback_restarts_prior_running_state()
+    {
+        var rollback = CalloutDriverDeployPlanner.PlanRollback(Snapshot(calloutWasRunning: true, productWasRunning: true));
+        Assert.True(rollback.RestoreLiveBinaryFromRollback);
+        Assert.True(rollback.RestartCalloutIfWasRunning);
+        Assert.True(rollback.RestartProductIfWasRunning);
+    }
+
+    [Fact]
+    public void Callout_was_stopped_before_deploy_does_not_force_running_on_rollback()
+    {
+        var rollback = CalloutDriverDeployPlanner.PlanRollback(Snapshot(calloutWasRunning: false, productWasRunning: false));
+        Assert.False(rollback.RestartCalloutIfWasRunning);
+        Assert.False(rollback.RestartProductIfWasRunning);
+    }
+
+    [Fact]
+    public void Callout_was_running_restored_on_rollback()
+    {
+        var rollback = CalloutDriverDeployPlanner.PlanRollback(Snapshot(calloutWasRunning: true, productWasRunning: false));
+        Assert.True(rollback.RestartCalloutIfWasRunning);
+        Assert.False(rollback.RestartProductIfWasRunning);
+    }
+
+    [Fact]
+    public void Linker_staging_path_never_equals_registered_runtime_path()
+    {
+        string runtime = DriverBuildLayout.RuntimeSysPath(PublishRoot);
+        string staging = DriverBuildLayout.StagingSysPath(RepoRoot);
+        Assert.NotEqual(Path.GetFullPath(staging), Path.GetFullPath(runtime));
+        Assert.True(DriverBuildLayout.LinkerOutputMustNotTargetRegisteredImagePath(staging, runtime));
+    }
+
+    [Fact]
+    public void Unicode_runtime_path_does_not_alias_staging()
+    {
+        string unicodePublish = @"E:\Работа\artifacts\publish\SelectiveVpnRouter";
+        string runtime = DriverBuildLayout.RuntimeSysPath(unicodePublish);
+        string staging = DriverBuildLayout.StagingSysPath(@"E:\Работа\OSPanel\domains\vpn-gateway");
+        Assert.True(CalloutDriverDeployPlanner.RollbackArtifactMustNotAliasStagedBuild(
+            DriverBuildLayout.RollbackSysPath(@"E:\Работа\OSPanel\domains\vpn-gateway"),
+            staging));
+        Assert.NotEqual(runtime, staging, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Rollback_artifact_cannot_alias_new_staged_file()
+    {
+        string staging = DriverBuildLayout.StagingSysPath(RepoRoot);
+        string rollback = DriverBuildLayout.RollbackSysPath(RepoRoot);
+        Assert.True(CalloutDriverDeployPlanner.RollbackArtifactMustNotAliasStagedBuild(rollback, staging));
+        Assert.False(CalloutDriverDeployPlanner.RollbackArtifactMustNotAliasStagedBuild(staging, staging));
+    }
+
+    private static CalloutDriverDeploySnapshot Snapshot(
+        bool calloutWasRunning = true,
+        bool productWasRunning = true,
+        string? stagedHash = null,
+        string? liveHash = null,
+        string? registeredImagePath = null) =>
+        new(
+            CalloutInstalled: true,
+            CalloutWasRunning: calloutWasRunning,
+            ProductInstalled: true,
+            ProductWasRunning: productWasRunning,
+            RegisteredImagePath: registeredImagePath ?? DriverBuildLayout.LegacyReleaseBuildSysPath(RepoRoot),
+            LiveRuntimeSysPath: DriverBuildLayout.RuntimeSysPath(PublishRoot),
+            LiveRuntimeHash: liveHash,
+            StagedHash: stagedHash);
 }

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using SelectiveVpnRouter.Core;
 
 namespace SelectiveVpnRouter.Network;
 
@@ -43,8 +44,16 @@ internal static class WfpNativeTypes
 
     internal enum FWP_ACTION_TYPE : uint
     {
-        FWP_ACTION_CALLOUT_UNKNOWN = 0x00004005,
-        FWP_ACTION_BLOCK = 0x00001001,
+        FWP_ACTION_BLOCK = WfpActionConstants.FwpActionBlock,
+        FWP_ACTION_PERMIT = WfpActionConstants.FwpActionPermit,
+        FWP_ACTION_CALLOUT_UNKNOWN = WfpActionConstants.FwpActionCalloutUnknown,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct FWP_V4_ADDR_AND_MASK0
+    {
+        public uint addr;
+        public uint mask;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

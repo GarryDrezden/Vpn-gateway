@@ -172,5 +172,6 @@ public class PortableBootstrapLauncherTests
         public DriverProbeSnapshot ProbeCalloutDriver() => Driver;
         public bool IsElevated() => Elevated;
         public string? TryReadAuthenticodeStatus(string filePath) => "Valid";
+        public bool IsTestSigningEnabled() => false;
     }
 }

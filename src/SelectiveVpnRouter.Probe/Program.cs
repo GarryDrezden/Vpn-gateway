@@ -1,7 +1,12 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
+using SelectiveVpnRouter.Core.Portable;
 using SelectiveVpnRouter.Network;
+
+Console.OutputEncoding = Encoding.UTF8;
+Console.InputEncoding = Encoding.UTF8;
 
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
@@ -15,6 +20,7 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
           --watch
           --tcp6 HOST PORT
           --spawn EXE [args...]
+          --validate-publish-layout DIR
           --via-proxy HOST:PORT
           --bind-if INDEX
           --public-ip [URL]
@@ -29,6 +35,19 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 if (args.Contains("--smoke-network-catalog"))
 {
     return RunNetworkCatalogSmoke();
+}
+
+if (args.Length >= 2 && args[0] == "--validate-publish-layout")
+{
+    string dir = args[1];
+    if (!PortableRuntimeLayoutValidator.TryValidate(dir, out IReadOnlyList<string> missing))
+    {
+        Console.WriteLine("publish-layout FAIL missing: " + string.Join(", ", missing));
+        return 1;
+    }
+
+    Console.WriteLine("publish-layout PASS");
+    return 0;
 }
 
 if (args.Length >= 2 && args[0] == "--spawn")
@@ -144,7 +163,7 @@ static async Task Tcp6Async(string host, int port)
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"tcp6 FAIL {sw.ElapsedMilliseconds}ms {ex.GetType().Name}: {ex.Message}");
+        Console.WriteLine(FormatSocketFailure("tcp6", sw.ElapsedMilliseconds, ex));
     }
 }
 
@@ -160,7 +179,7 @@ static async Task TcpAsync(string host, int port, int? bindIf, string? proxy)
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"tcp FAIL {sw.ElapsedMilliseconds}ms {ex.GetType().Name}: {ex.Message}");
+        Console.WriteLine(FormatSocketFailure("tcp", sw.ElapsedMilliseconds, ex));
     }
 }
 
@@ -201,8 +220,18 @@ static async Task HttpAsync(string url, int? bindIf, string? proxy)
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"http FAIL {sw.ElapsedMilliseconds}ms {ex.GetType().Name}: {ex.Message}");
+        Console.WriteLine(FormatSocketFailure("http", sw.ElapsedMilliseconds, ex));
     }
+}
+
+static string FormatSocketFailure(string kind, long elapsedMs, Exception ex)
+{
+    if (ex is SocketException sx)
+    {
+        return $"{kind} FAIL {elapsedMs}ms SocketException: {sx.Message} SocketErrorCode={sx.SocketErrorCode} ({(int)sx.SocketErrorCode}) NativeErrorCode={sx.NativeErrorCode}";
+    }
+
+    return $"{kind} FAIL {elapsedMs}ms {ex.GetType().Name}: {ex.Message}";
 }
 
 static async Task<Socket> ConnectAsync(string host, int port, int? bindIf, string? proxy)

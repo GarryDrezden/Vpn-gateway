@@ -29,6 +29,15 @@ public enum FlowRoute
     Unknown = 3,
 }
 
+public sealed record PackagedApplicationBinding
+{
+    public required string PackageFamilyName { get; init; }
+    public required string ApplicationId { get; init; }
+    public string? RelativeExecutablePath { get; init; }
+    public required string UserSid { get; init; }
+    public string? ResolvedPackageFullName { get; init; }
+}
+
 public sealed record RoutingRule
 {
     public required Guid Id { get; init; }
@@ -37,6 +46,7 @@ public sealed record RoutingRule
     public required string Name { get; init; }
     public required string Target { get; init; }
     public required RouteMode Mode { get; init; }
+    public PackagedApplicationBinding? PackagedBinding { get; init; }
 
     public static RoutingRule Create(RuleType type, string name, string target, RouteMode mode)
         => new()

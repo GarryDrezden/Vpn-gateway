@@ -22,4 +22,5 @@ public interface ISystemBootstrapProbe
     DriverProbeSnapshot ProbeCalloutDriver();
     bool IsElevated();
     string? TryReadAuthenticodeStatus(string filePath);
+    bool IsTestSigningEnabled();
 }

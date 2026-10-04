@@ -44,5 +44,6 @@ public class PortableBootstrapMutatorPathTests
         public DriverProbeSnapshot ProbeCalloutDriver() => new();
         public bool IsElevated() => true;
         public string? TryReadAuthenticodeStatus(string filePath) => "NotSigned";
+        public bool IsTestSigningEnabled() => false;
     }
 }

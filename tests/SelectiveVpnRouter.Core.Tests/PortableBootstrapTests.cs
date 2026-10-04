@@ -232,6 +232,7 @@ public class PortableBootstrapTests
         public DriverProbeSnapshot ProbeCalloutDriver() => Driver;
         public bool IsElevated() => Elevated;
         public string? TryReadAuthenticodeStatus(string filePath) => "Valid";
+        public bool IsTestSigningEnabled() => false;
     }
 
     private sealed class FakeBootstrapProbe : ISystemBootstrapProbe
@@ -244,5 +245,6 @@ public class PortableBootstrapTests
         public DriverProbeSnapshot ProbeCalloutDriver() => Driver;
         public bool IsElevated() => Elevated;
         public string? TryReadAuthenticodeStatus(string filePath) => "Valid";
+        public bool IsTestSigningEnabled() => false;
     }
 }

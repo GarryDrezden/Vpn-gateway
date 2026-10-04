@@ -14,7 +14,7 @@ Application WFP rules target **TCP connect** layers only (`ALE_CONNECT_REDIRECT_
 
 Some clients (notably Windows `curl.exe`) may fail name resolution with `getaddrinfo() thread failed to start` while a temp VPN rule is active, even though `Resolve-DnsName` works system-wide. This is libcurl's threaded resolver failing to start a worker thread — not proof that TCP routing is broken. Verify TCP/VPN egress with `curl --resolve` (preserves SNI/hostname, skips DNS lookup only).
 
-The kernel callout currently bypasses redirect only for `127.0.0.1:<proxyPort>` and proxy PID. Full `127.0.0.0/8` bypass in the driver is recommended if local loopback TCP must never be redirected; managed proxy also bypasses loopback destinations that reach the proxy.
+The kernel callout bypasses redirect for all IPv4 destinations in `127.0.0.0/8` (local OAuth/listeners) and for `127.0.0.1:<proxyPort>` loop prevention on the proxy PID path. The transparent proxy also bypasses loopback destinations that reach the proxy. IPv6 `::1` is not CONNECT_REDIRECT_V6 redirected (no v6 callout); optional IPv6 block filters are separate.
 
 ## UDP / QUIC
 
@@ -55,3 +55,9 @@ No MSI yet. Use `dotnet publish` + `scripts\install-service.ps1` / uninstall scr
 ## V0.1 destination /32 experiment
 
 Not the Application-rule path. Do not resurrect it as process routing.
+
+## Packaged apps — token exchange under selective routing
+
+Some MSIX applications spawn **additional executables** declared in `AppxManifest` (hidden helpers). VPN Route can install WFP redirect + loopback PERMIT filters for **primary and associated manifest helpers** resolved from stable packaged binding (PFN + ApplicationId + user SID).
+
+**Known gap:** ChatGPT / OpenAI Codex may still fail OAuth at the **token exchange** step with HTTP 403 (*Country, region, or territory not supported*) while selective routing is active, even when the browser, primary packaged executable, manifest helper, and localhost OAuth callback path are covered. **Full-device VPN** may succeed for the same login. This is **not** treated as a generic routing failure; additional network components or auth mechanisms may sit outside current per-process attribution. Do not assume token-exchange ownership without explicit flow evidence.

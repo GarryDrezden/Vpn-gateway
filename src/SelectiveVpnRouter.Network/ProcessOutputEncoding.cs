@@ -14,4 +14,10 @@ public static class ProcessOutputEncoding
         psi.StandardOutputEncoding = enc;
         psi.StandardErrorEncoding = enc;
     }
+
+    public static void UseUtf8(ProcessStartInfo psi)
+    {
+        psi.StandardOutputEncoding = Encoding.UTF8;
+        psi.StandardErrorEncoding = Encoding.UTF8;
+    }
 }

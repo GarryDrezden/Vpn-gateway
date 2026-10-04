@@ -71,15 +71,10 @@ public sealed class WindowsBootstrapMutator
         }
 
         string? auth = _probe.TryReadAuthenticodeStatus(sysPath);
-        bool valid = string.Equals(auth, "Valid", StringComparison.OrdinalIgnoreCase);
-        if (!valid)
+        if (PortableDriverSigningPolicy.BlocksUnsignedInstall(auth, _probe.IsTestSigningEnabled()))
         {
-            bool testsigning = TryTestSigningEnabled();
-            if (!testsigning)
-            {
-                throw new PortableDriverSigningBlockedException(
-                    $"Driver signature is not trusted (Authenticode={auth ?? "unknown"}) and test signing is off.");
-            }
+            throw new PortableDriverSigningBlockedException(
+                $"Driver signature is not trusted (Authenticode={auth ?? "unknown"}) and test signing is off.");
         }
 
         string fullSys = Path.GetFullPath(sysPath);
@@ -94,30 +89,6 @@ public sealed class WindowsBootstrapMutator
     {
         TryStopService(PortableLayout.DriverServiceName);
         RunSc($"delete {PortableLayout.DriverServiceName}", ignoreErrors: true);
-    }
-
-    private static bool TryTestSigningEnabled()
-    {
-        try
-        {
-            ProcessStartInfo psi = new()
-            {
-                FileName = "bcdedit.exe",
-                Arguments = "/enum {current}",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true,
-            };
-            using Process p = Process.Start(psi)!;
-            string output = p.StandardOutput.ReadToEnd();
-            p.WaitForExit(5000);
-            return output.Contains("testsigning", StringComparison.OrdinalIgnoreCase)
-                && output.Contains("Yes", StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception)
-        {
-            return false;
-        }
     }
 
     private static void TryStopService(string name)

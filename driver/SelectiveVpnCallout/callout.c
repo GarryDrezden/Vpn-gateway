@@ -17,6 +17,19 @@ static void SvrApplyModifiedLayerDataTracked(
     }
 }
 
+/* Writable ALE connect data was acquired; finalize without redirect (required before release). */
+static void SvrPermitWritableConnectWithoutRedirect(
+    _In_ UINT64 classifyHandle,
+    _In_ FWPS_CONNECT_REQUEST *request)
+{
+    SvrApplyModifiedLayerDataTracked(
+        classifyHandle,
+        request,
+        FWPS_CLASSIFY_FLAG_REAUTHORIZE_IF_MODIFIED_BY_OTHERS,
+        FALSE);
+    FwpsReleaseClassifyHandle(classifyHandle);
+}
+
 static VOID SvrCaptureRuntimeAppId(
     _In_ const FWPS_INCOMING_VALUES *inFixedValues,
     _In_ const FWPS_INCOMING_METADATA_VALUES *inMetaValues,
@@ -79,9 +92,20 @@ static VOID SvrCaptureRuntimeAppId(
     }
 }
 
+static BOOLEAN SvrIsIpv4LoopbackDestination(_In_ const SOCKADDR_IN *remote)
+{
+    if (remote == NULL || remote->sin_family != AF_INET)
+    {
+        return FALSE;
+    }
+
+    /* SOCKADDR_IN IPv4 address bytes are stored in network order (127/8 => first byte 0x7F). */
+    return ((const UCHAR *)&remote->sin_addr.S_un.S_addr)[0] == 127;
+}
+
 static BOOLEAN SvrAlreadyLoopbackProxy(_In_ const SOCKADDR_IN *remote)
 {
-    UINT32 loopback = 0x0100007F; /* 127.0.0.1 network order */
+    UINT32 loopback = 0x0100007F; /* 127.0.0.1 in SOCKADDR_IN layout */
     if (remote == NULL)
     {
         return FALSE;
@@ -213,12 +237,15 @@ VOID NTAPI SvrClassifyConnectRedirect(
     if (SvrAlreadyLoopbackProxy(remote))
     {
         InterlockedIncrement(&gAlreadyLoopbackProxy);
-        SvrApplyModifiedLayerDataTracked(
-            classifyHandle,
-            request,
-            FWPS_CLASSIFY_FLAG_REAUTHORIZE_IF_MODIFIED_BY_OTHERS,
-            FALSE);
-        FwpsReleaseClassifyHandle(classifyHandle);
+        SvrPermitWritableConnectWithoutRedirect(classifyHandle, request);
+        classifyOut->actionType = FWP_ACTION_PERMIT;
+        return;
+    }
+
+    if (SvrIsIpv4LoopbackDestination(remote))
+    {
+        InterlockedIncrement(&gLoopbackDestinationBypass);
+        SvrPermitWritableConnectWithoutRedirect(classifyHandle, request);
         classifyOut->actionType = FWP_ACTION_PERMIT;
         return;
     }

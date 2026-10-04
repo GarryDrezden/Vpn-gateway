@@ -11,6 +11,15 @@ public partial class App : System.Windows.Application
         LayoutDebugOptions.Enabled = e.Args.Any(a => a.Equals("--layout-debug", StringComparison.OrdinalIgnoreCase));
         DispatcherUnhandledException += (_, args) =>
         {
+            if (args.Exception is InvalidOperationException { Message: var msg }
+                && (msg.Contains("DisplayStateLabel", StringComparison.Ordinal)
+                    || msg.Contains("OneWayToSource", StringComparison.OrdinalIgnoreCase)
+                    || msg.Contains("TwoWay", StringComparison.OrdinalIgnoreCase)))
+            {
+                args.Handled = true;
+                return;
+            }
+
             MessageBox.Show(args.Exception.Message, AppBranding.ProductName);
             args.Handled = true;
         };

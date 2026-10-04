@@ -15,7 +15,10 @@ public static class RuleEvaluator
     /// Explicit DIRECT application rules beat VPN application rules.
     /// Domain/CIDR rules are destination-global and must not be mixed into this result.
     /// </summary>
-    public static ProcessMatch MatchProcess(IEnumerable<RoutingRule> rules, string processPath)
+    public static ProcessMatch MatchProcess(
+        IEnumerable<RoutingRule> rules,
+        string processPath,
+        PackagedRoutingTargetIndex? packagedRoutingIndex = null)
     {
         string normalized = ExecutablePathNormalizer.Normalize(processPath);
         if (normalized.Length == 0)
@@ -38,6 +41,12 @@ public static class RuleEvaluator
         if (vpn is not null)
         {
             return new ProcessMatch(vpn, RouteMode.Vpn);
+        }
+
+        if (packagedRoutingIndex?.TryGetLogicalRule(normalized, out RoutingRule? logicalRule, out _) == true
+            && logicalRule is { Enabled: true, Type: RuleType.Application })
+        {
+            return new ProcessMatch(logicalRule, logicalRule.Mode);
         }
 
         return ProcessMatch.None;

@@ -23,6 +23,7 @@ volatile LONG gExitProxyPid = 0;
 volatile LONG gAcquireClassifyHandleFailures = 0;
 volatile LONG gAcquireWritableLayerDataFailures = 0;
 volatile LONG gAlreadyLoopbackProxy = 0;
+volatile LONG gLoopbackDestinationBypass = 0;
 volatile LONG gAllocationFailures = 0;
 volatile UINT64 gLastClassifyPid = 0;
 volatile UINT64 gLastFilterId = 0;
@@ -166,7 +167,7 @@ VOID SvrEvtIoDeviceControl(
                 out->RuntimeProcessId = gRuntimeCapturePid;
                 out->RuntimeFilterId = gRuntimeCaptureFilterId;
                 out->RuntimeRights = gRuntimeCaptureRights;
-                out->RuntimeCapturePad = 0;
+                out->RuntimeCapturePad = (UINT32)gLoopbackDestinationBypass;
                 RtlCopyMemory(
                     out->RuntimeAppIdText,
                     gRuntimeAppIdText,

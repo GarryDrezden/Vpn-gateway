@@ -16,6 +16,10 @@ public sealed record WfpFilterInstallResult
     public uint FilterAddStatus { get; init; }
     public ulong FilterId { get; init; }
     public bool IsCalloutFilter { get; init; }
+    public WfpFilterRole Role { get; init; } = WfpFilterRole.RedirectCallout;
+    public ulong FilterWeight { get; init; }
+    public uint ActionType { get; init; }
+    public string? FilterAddContext { get; init; }
     public string? Error { get; init; }
 }
 

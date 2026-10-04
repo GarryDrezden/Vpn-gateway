@@ -28,6 +28,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
     private readonly OwnedCancellationTokenSource _serviceCts = new();
     private AsyncDisposeGate _disposeGate;
     private bool _paused;
+    private readonly IPackagedApplicationPathResolver _packagedApplicationPathResolver = new WindowsPackagedApplicationPathResolver();
     private AdapterView? _vpnAdapter;
     private VpnAdapterSelection? _vpnAdapterSelection;
     private AdapterView? _directAdapter;
@@ -46,17 +47,19 @@ public sealed partial class RouterEngine : IAsyncDisposable
         ProgramDataStorage.EnsureConfigured();
         ProgramDataStorage.LogStartupDiagnostics(Log);
         AppConfiguration loaded = ConfigSerializer.LoadOrDefault(AppPaths.ConfigFile);
-        Config = loaded with
+        loaded = loaded with
         {
             WorkVpn = WorkVpnProfileDefaults.WithMigrationDefaults(loaded.WorkVpn),
         };
+        Config = ApplyPackagedRuleRebind(loaded, persistIfChanged: true);
         CrashCleanup.ReconcileStale(Log);
     }
 
     public void SaveConfig(AppConfiguration config)
     {
-        Config = config;
-        ConfigSerializer.Save(AppPaths.ConfigFile, config);
+        AppConfiguration rebound = ApplyPackagedRuleRebind(config, persistIfChanged: false);
+        Config = rebound;
+        ConfigSerializer.Save(AppPaths.ConfigFile, rebound);
         _ = RefreshPolicyAsync();
     }
 
@@ -427,9 +430,9 @@ public sealed partial class RouterEngine : IAsyncDisposable
 
     public async Task RefreshPolicyAsync()
     {
-        AppConfiguration cfg = Config;
+        AppConfiguration cfg = ApplyPackagedRuleRebind(Config, persistIfChanged: true);
         IEnumerable<string>? extra = _tempRealAppExePath is null ? null : [_tempRealAppExePath];
-        IReadOnlyList<string> vpnExes = VpnApplicationPathCollector.Collect(cfg.Rules, _paused, extra);
+        IReadOnlyList<string> vpnExes = VpnApplicationPathCollector.Collect(cfg.Rules, _paused, extra, _packagedApplicationPathResolver);
         Ipv6Policy ipv6 = cfg.Vpn.Ipv6Policy;
         if (ipv6 == Ipv6Policy.Auto)
         {
@@ -499,6 +502,26 @@ public sealed partial class RouterEngine : IAsyncDisposable
         }
 
         await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    private AppConfiguration ApplyPackagedRuleRebind(AppConfiguration config, bool persistIfChanged)
+    {
+        PackagedApplicationRuleRebindResult result = PackagedApplicationRuleRebinder.TryRebind(
+            config,
+            _packagedApplicationPathResolver,
+            Log);
+        if (!result.Changed)
+        {
+            return config;
+        }
+
+        Config = result.Config;
+        if (persistIfChanged)
+        {
+            ConfigSerializer.Save(AppPaths.ConfigFile, result.Config);
+        }
+
+        return result.Config;
     }
 
     private async Task ReconcileLoop(CancellationToken ct)

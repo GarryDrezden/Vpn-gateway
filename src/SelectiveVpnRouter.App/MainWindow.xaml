@@ -221,108 +221,202 @@
 
       <!-- APPLICATIONS -->
       <TabItem Header="Приложения">
-        <DockPanel Margin="4">
-          <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="12" Margin="0,0,0,12">
-            <DockPanel LastChildFill="True">
-              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                <Button Content="+ Добавить" Click="OnAddApp" Style="{StaticResource PrimaryButton}" MinWidth="140"/>
-              </StackPanel>
-              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="Приложения" Style="{StaticResource SectionTitleText}" Margin="0,0,16,0"/>
-                <TextBox x:Name="AppSearchBox" Width="220" Margin="0,0,12,0"
-                         ToolTip="Поиск по имени или пути" TextChanged="OnAppFilterChanged"/>
-                <ToggleButton x:Name="AppFilterAll" Content="Все" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"
-                              IsChecked="True" Click="OnAppFilterChanged"/>
-                <ToggleButton x:Name="AppFilterVpn" Content="VPN" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"
-                              Click="OnAppFilterChanged"/>
-                <ToggleButton x:Name="AppFilterDirect" Content="Напрямую" Style="{StaticResource RouteToggleButton}"
-                              Click="OnAppFilterChanged"/>
-              </StackPanel>
+        <TabControl x:Name="AppsInnerTabControl" Margin="4" SelectionChanged="OnAppsInnerTabChanged">
+          <TabItem Header="Маршрутизация">
+            <DockPanel>
+              <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="12" Margin="0,0,0,12">
+                <DockPanel LastChildFill="True">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Добавить .exe вручную" Click="OnAddApp" Style="{StaticResource PrimaryButton}" MinWidth="180"/>
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Маршрутизация" Style="{StaticResource SectionTitleText}" Margin="0,0,16,0"/>
+                    <TextBox x:Name="AppSearchBox" Width="220" Margin="0,0,12,0"
+                             ToolTip="Поиск по имени" TextChanged="OnAppFilterChanged"/>
+                    <ToggleButton x:Name="AppFilterAll" Content="Все" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"
+                                  IsChecked="True" Click="OnAppFilterChanged"/>
+                    <ToggleButton x:Name="AppFilterVpn" Content="VPN" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"
+                                  Click="OnAppFilterChanged"/>
+                    <ToggleButton x:Name="AppFilterDirect" Content="Напрямую" Style="{StaticResource RouteToggleButton}"
+                                  Click="OnAppFilterChanged"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <Border x:Name="AppsEmptyPanel" DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Visibility="Collapsed" Margin="0,0,0,12">
+                <StackPanel HorizontalAlignment="Center" MaxWidth="480">
+                  <TextBlock Text="Пока нет приложений с отдельным маршрутом." FontSize="16" FontWeight="SemiBold"
+                             HorizontalAlignment="Center" TextAlignment="Center"/>
+                  <TextBlock Text="Добавьте программу из каталога «Установленные» или вручную."
+                             Style="{StaticResource SecondaryText}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,16"/>
+                  <Button Content="Добавить .exe вручную" Click="OnAddApp" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center"/>
+                </StackPanel>
+              </Border>
+
+              <Border Style="{StaticResource CardBorder}" Padding="0">
+                <ListView x:Name="AppsList"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling">
+                  <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                      <Setter Property="Padding" Value="0"/>
+                      <Setter Property="Background" Value="Transparent"/>
+                    </Style>
+                  </ListView.ItemContainerStyle>
+                  <ListView.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource AppListRowBorder}" ToolTip="{Binding ExePath}">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="140"/>
+                            <ColumnDefinition Width="Auto"/>
+                          </Grid.ColumnDefinitions>
+                          <Image Source="{Binding Icon}" Width="32" Height="32" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                          <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding ConfiguredRouteText}" Style="{StaticResource SecondaryText}"/>
+                          </StackPanel>
+                          <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
+                            <RadioButton Content="VPN" Tag="Vpn" GroupName="{Binding Id}"
+                                         IsChecked="{Binding IsVpnSelected, Mode=OneWay}" Checked="OnAppRouteToggle"/>
+                            <RadioButton Content="Напрямую" Tag="Direct" GroupName="{Binding Id}" Margin="8,0,0,0"
+                                         IsChecked="{Binding IsDirectSelected, Mode=OneWay}" Checked="OnAppRouteToggle"/>
+                          </StackPanel>
+                          <TextBlock Grid.Column="3" Text="{Binding StatusText}" FontSize="12" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                          <Button Grid.Column="4" Content="Удалить" Tag="{Binding Id}" Click="OnRemoveAppRule"
+                                  Style="{StaticResource DangerButton}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </Border>
             </DockPanel>
-          </Border>
+          </TabItem>
 
-          <Border x:Name="AppsEmptyPanel" DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Visibility="Collapsed" Margin="0,0,0,12">
-            <StackPanel HorizontalAlignment="Center" MaxWidth="480">
-              <TextBlock Text="Пока нет приложений с отдельным маршрутом." FontSize="16" FontWeight="SemiBold"
-                         HorizontalAlignment="Center" TextAlignment="Center"/>
-              <TextBlock Text="Добавьте программу и выберите, должна ли она использовать VPN."
-                         Style="{StaticResource SecondaryText}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,16"/>
-              <Button Content="+ Добавить приложение" Click="OnAddApp" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center"/>
-            </StackPanel>
-          </Border>
-
-          <Border Style="{StaticResource CardBorder}" Padding="0">
-            <ListView x:Name="AppsList"
-                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                      ScrollViewer.CanContentScroll="True"
-                      VirtualizingPanel.IsVirtualizing="True"
-                      VirtualizingPanel.VirtualizationMode="Recycling">
-              <ListView.ItemsPanel>
-                <ItemsPanelTemplate>
-                  <VirtualizingStackPanel/>
-                </ItemsPanelTemplate>
-              </ListView.ItemsPanel>
-              <ListView.ItemContainerStyle>
-                <Style TargetType="ListViewItem">
-                  <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                  <Setter Property="Padding" Value="0"/>
-                  <Setter Property="Margin" Value="0"/>
-                  <Setter Property="BorderThickness" Value="0"/>
-                  <Setter Property="Background" Value="Transparent"/>
-                </Style>
-              </ListView.ItemContainerStyle>
-              <ListView.ItemTemplate>
-                <DataTemplate>
-                  <Border Style="{StaticResource AppListRowBorder}">
+          <TabItem Header="Установленные">
+            <DockPanel>
+              <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="12" Margin="0,0,0,12">
+                <StackPanel>
+                  <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right" Content="Обновить" Click="OnRefreshInstalledApps" MinWidth="120" Margin="12,0,0,0"/>
                     <Grid>
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="140"/>
-                        <ColumnDefinition Width="Auto"/>
-                      </Grid.ColumnDefinitions>
-                      <Image Source="{Binding Icon}" Width="32" Height="32" Margin="0,0,12,0" VerticalAlignment="Center"/>
-                      <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold"/>
-                        <TextBlock Text="{Binding FileName}" Style="{StaticResource SecondaryText}"/>
-                        <TextBlock Text="{Binding ExePath}" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
-                      </StackPanel>
-                      <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
-                        <RadioButton Content="VPN" Tag="Vpn" GroupName="{Binding Id}"
-                                     IsChecked="{Binding IsVpnSelected, Mode=OneWay}" Checked="OnAppRouteToggle"/>
-                        <RadioButton Content="Напрямую" Tag="Direct" GroupName="{Binding Id}" Margin="8,0,0,0"
-                                     IsChecked="{Binding IsDirectSelected, Mode=OneWay}" Checked="OnAppRouteToggle"/>
-                      </StackPanel>
-                      <StackPanel Grid.Column="3" VerticalAlignment="Center" HorizontalAlignment="Right">
-                        <TextBlock Text="{Binding StatusText}" FontSize="12" TextTrimming="CharacterEllipsis" HorizontalAlignment="Right">
-                          <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                              <Style.Triggers>
-                                <DataTrigger Binding="{Binding StatusBrushKey}" Value="StatusSuccess">
-                                  <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding StatusBrushKey}" Value="StatusWaiting">
-                                  <Setter Property="Foreground" Value="{StaticResource WaitingBrush}"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding StatusBrushKey}" Value="StatusNeutral">
-                                  <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-                                </DataTrigger>
-                              </Style.Triggers>
-                            </Style>
-                          </TextBlock.Style>
-                        </TextBlock>
-                        <TextBlock Text="{Binding ConfiguredRouteText}" Style="{StaticResource SecondaryText}" FontSize="11" HorizontalAlignment="Right"/>
-                      </StackPanel>
-                      <Button Grid.Column="4" Content="Удалить" Tag="{Binding Id}" Click="OnRemoveAppRule"
-                              Style="{StaticResource DangerButton}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                      <TextBox x:Name="InstalledAppsSearchBox" ToolTip="Поиск приложений..."
+                               TextChanged="OnInstalledAppsSearchChanged"/>
+                      <TextBlock x:Name="InstalledAppsSearchPlaceholder" Text="Поиск приложений..." IsHitTestVisible="False"
+                                 Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
                     </Grid>
-                  </Border>
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-          </Border>
-        </DockPanel>
+                  </DockPanel>
+                  <CheckBox x:Name="InstalledShowSystemCheckBox" Margin="0,10,0,0"
+                            Content="Показывать системные и служебные"
+                            Checked="OnInstalledDiscoveryOptionsChanged" Unchecked="OnInstalledDiscoveryOptionsChanged"/>
+                </StackPanel>
+              </Border>
+              <TextBlock x:Name="InstalledAppsLoadingText" DockPanel.Dock="Top" Text="Загрузка каталога..."
+                         Style="{StaticResource SecondaryText}" Margin="8,0,0,8" Visibility="Collapsed"/>
+              <Border DockPanel.Dock="Bottom" x:Name="InstalledAppsActionBar" Style="{StaticResource CardBorder}" Padding="12" Margin="0,12,0,0" Visibility="Collapsed">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Добавить через VPN" Click="OnAddInstalledSelectionVpn" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0"/>
+                    <Button Content="Добавить напрямую" Click="OnAddInstalledSelectionDirect"/>
+                  </StackPanel>
+                  <TextBlock x:Name="InstalledAppsSelectionText" VerticalAlignment="Center" Text="Выбрано: 0"/>
+                </DockPanel>
+              </Border>
+              <Border Style="{StaticResource CardBorder}" Padding="0">
+                <ListView x:Name="InstalledAppsList" VirtualizingPanel.IsVirtualizing="True"
+                          SelectionChanged="OnInstalledAppsSelectionChanged">
+                  <ListView.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource AppListRowBorder}" ToolTip="{Binding ExecutablePath}">
+                        <Grid HorizontalAlignment="Stretch">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                          </Grid.ColumnDefinitions>
+                          <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" IsEnabled="{Binding IsSelectable}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                          <Image Grid.Column="1" Source="{Binding Icon}" Width="32" Height="32" Margin="0,0,12,0"/>
+                          <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0">
+                            <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding Publisher}" Style="{StaticResource SecondaryText}" TextTrimming="CharacterEllipsis"/>
+                          </StackPanel>
+                          <TextBlock Grid.Column="3" Text="{Binding ExistingRouteText}" Style="{StaticResource SecondaryText}" FontSize="11"
+                                     VerticalAlignment="Center" HorizontalAlignment="Right" MinWidth="140" TextAlignment="Right"/>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </Border>
+            </DockPanel>
+          </TabItem>
+
+          <TabItem Header="Запущенные">
+            <DockPanel>
+              <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="12" Margin="0,0,0,12">
+                <StackPanel>
+                  <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right" Content="Обновить" Click="OnRefreshRunningApps" MinWidth="120" Margin="12,0,0,0"/>
+                    <Grid>
+                      <TextBox x:Name="RunningAppsSearchBox" ToolTip="Поиск приложений..."
+                               TextChanged="OnRunningAppsSearchChanged"/>
+                      <TextBlock x:Name="RunningAppsSearchPlaceholder" Text="Поиск приложений..." IsHitTestVisible="False"
+                                 Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}"/>
+                    </Grid>
+                  </DockPanel>
+                  <CheckBox x:Name="RunningShowBackgroundCheckBox" Margin="0,10,0,0"
+                            Content="Показывать фоновые и служебные процессы"
+                            Checked="OnRunningDiscoveryOptionsChanged" Unchecked="OnRunningDiscoveryOptionsChanged"/>
+                </StackPanel>
+              </Border>
+              <TextBlock x:Name="RunningAppsLoadingText" DockPanel.Dock="Top" Text="Обновление списка..."
+                         Style="{StaticResource SecondaryText}" Margin="8,0,0,8" Visibility="Collapsed"/>
+              <Border DockPanel.Dock="Bottom" x:Name="RunningAppsActionBar" Style="{StaticResource CardBorder}" Padding="12" Margin="0,12,0,0" Visibility="Collapsed">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Добавить через VPN" Click="OnAddRunningSelectionVpn" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0"/>
+                    <Button Content="Добавить напрямую" Click="OnAddRunningSelectionDirect"/>
+                  </StackPanel>
+                  <TextBlock x:Name="RunningAppsSelectionText" VerticalAlignment="Center" Text="Выбрано: 0"/>
+                </DockPanel>
+              </Border>
+              <Border Style="{StaticResource CardBorder}" Padding="0">
+                <ListView x:Name="RunningAppsList" VirtualizingPanel.IsVirtualizing="True"
+                          SelectionChanged="OnRunningAppsSelectionChanged">
+                  <ListView.ItemTemplate>
+                    <DataTemplate>
+                      <Border Style="{StaticResource AppListRowBorder}" ToolTip="{Binding ExecutablePath}">
+                        <Grid HorizontalAlignment="Stretch">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                          </Grid.ColumnDefinitions>
+                          <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" IsEnabled="{Binding IsSelectable}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                          <Image Grid.Column="1" Source="{Binding Icon}" Width="32" Height="32" Margin="0,0,12,0"/>
+                          <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0">
+                            <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding Publisher}" Style="{StaticResource SecondaryText}" TextTrimming="CharacterEllipsis"/>
+                          </StackPanel>
+                          <TextBlock Grid.Column="3" Text="{Binding ExistingRouteText}" Style="{StaticResource SecondaryText}" FontSize="11"
+                                     VerticalAlignment="Center" HorizontalAlignment="Right" MinWidth="140" TextAlignment="Right"/>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </Border>
+            </DockPanel>
+          </TabItem>
+        </TabControl>
       </TabItem>
 
       <!-- CONNECTIONS -->
@@ -468,7 +562,7 @@
                                       </Border.Style>
                                       <TextBlock Text="{Binding RouteLabel}" Style="{StaticResource RouteBadgeText}"/>
                                     </Border>
-                                    <TextBlock Grid.Column="3" Text="{Binding DisplayStateLabel}" Style="{StaticResource SecondaryText}" FontSize="12"
+                                    <TextBlock Grid.Column="3" Text="{Binding DisplayStateLabel, Mode=OneWay}" Style="{StaticResource SecondaryText}" FontSize="12"
                                                VerticalAlignment="Center" Margin="8,0,0,0"/>
                                     <TextBlock Grid.Column="4" Text="{Binding SampleFlow.UpdatedAtLocalText}" Style="{StaticResource SecondaryText}" FontSize="11"
                                                HorizontalAlignment="Right" VerticalAlignment="Center"/>
@@ -505,11 +599,11 @@
                             <ItemsControl.ItemTemplate>
                               <DataTemplate>
                                 <TextBlock FontFamily="Consolas" FontSize="12" Style="{StaticResource SecondaryText}">
-                                  <Run Text="{Binding RemoteEndpoint}"/>
+                                  <Run Text="{Binding RemoteEndpoint, Mode=OneWay}"/>
                                   <Run Text="  "/>
-                                  <Run Text="{Binding RouteLabel}"/>
+                                  <Run Text="{Binding RouteLabel, Mode=OneWay}"/>
                                   <Run Text="  "/>
-                                  <Run Text="{Binding DisplayStateLabel}"/>
+                                  <Run Text="{Binding DisplayStateLabel, Mode=OneWay}"/>
                                 </TextBlock>
                               </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -536,13 +630,23 @@
 
       <!-- DIAGNOSTICS -->
       <TabItem Header="Диагностика">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="4">
-          <StackPanel>
-            <TextBlock Text="Диагностика" Style="{StaticResource SectionTitleText}" Margin="0,0,0,8"/>
+        <TabControl x:Name="DiagInnerTabs" Margin="4">
+          <TabItem Header="Test Center">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
+          <ScrollViewer x:Name="TestCenterScrollViewer" Grid.Row="0"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          PreviewMouseWheel="OnTestCenterScrollPreviewMouseWheel">
+          <TabControl x:Name="TestCenterCategoryTabs" Margin="0,0,0,4">
+            <TabItem Header="Базовые">
+          <StackPanel Margin="0,4,0,8">
             <Button Content="Запустить базовую диагностику" Click="OnRunBasicDiagnostics" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left"/>
-            <TextBlock x:Name="BasicDiagSummaryText" TextWrapping="Wrap" Margin="0,10,0,16" FontWeight="SemiBold"/>
+            <TextBlock x:Name="BasicDiagSummaryText" TextWrapping="Wrap" Margin="0,8,0,10" FontWeight="SemiBold"/>
 
-            <Grid Margin="0,0,0,12">
+            <Grid Margin="0,0,0,4">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="12"/>
@@ -614,56 +718,37 @@
                 </StackPanel>
               </Border>
             </Grid>
-
-            <Expander x:Name="AdvancedDiagnosticsExpander" Header="Расширенная диагностика" IsExpanded="False" Margin="0,0,0,12">
-              <StackPanel Margin="0,8,0,0">
-                <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,12"
-                           Text="Инженерные проверки, acceptance-тесты, мастер настройки и инструменты разработчика."/>
-                <WrapPanel Margin="0,0,0,12">
-                  <Button Content="Тест очистки" Click="OnDiag" Tag="cleanup" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                  <Button Content="Экспорт отчёта" Click="OnDiag" Tag="export" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
+          </StackPanel>
+            </TabItem>
+            <TabItem Header="Маршрутизация">
+              <StackPanel Margin="0,4,0,8">
+                <TextBlock Text="Проверка реального приложения" Style="{StaticResource SectionTitleText}" Margin="0,0,0,6"/>
+                <DockPanel LastChildFill="True" Margin="0,0,0,6">
+                  <Button DockPanel.Dock="Right" Content="Обзор EXE" Click="OnBrowseRealApp" Style="{StaticResource SecondaryButton}" MinWidth="100" Margin="8,0,0,0" Padding="10,4"/>
+                  <TextBox x:Name="RealAppExeBox" IsReadOnly="True" ToolTip="Полный путь к EXE"/>
+                </DockPanel>
+                <WrapPanel Margin="0,0,0,6">
+                  <Button Content="Временно через VPN" Click="OnApplyTempRealApp" Style="{StaticResource SecondaryButton}" Margin="0,0,6,4" Padding="10,4"/>
+                  <Button Content="Удалить временное правило" Click="OnRemoveTempRealApp" Style="{StaticResource SecondaryButton}" Margin="0,0,6,4" Padding="10,4"/>
+                  <Button Content="Обновить статус" Click="OnRefreshTempRealApp" Style="{StaticResource SecondaryButton}" Margin="0,0,6,4" Padding="10,4"/>
                 </WrapPanel>
-
-                <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12">
-                  <StackPanel>
-                    <TextBlock Text="Мастер настройки" Style="{StaticResource SectionTitleText}" Margin="0,0,0,8"/>
-                    <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8"
-                               Text="Первое приложение для быстрого старта (сохраняется вместе с настройками VPN)."/>
-                    <TextBlock Text="Первое приложение" Style="{StaticResource SecondaryText}" Margin="0,0,0,4"/>
-                    <DockPanel LastChildFill="True">
-                      <Button DockPanel.Dock="Right" Content="Обзор EXE" Click="OnBrowseFirstApp" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0"/>
-                      <TextBox x:Name="FirstAppBox"/>
-                    </DockPanel>
-                  </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12">
-                  <StackPanel>
-                    <TextBlock FontWeight="Bold" FontSize="14" Text="Проверка реального приложения"/>
-                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,8" Style="{StaticResource SecondaryText}"
-                               Text="Временное VPN-правило только для выбранного EXE. Постоянные Rules не меняются."/>
-                    <DockPanel LastChildFill="True" Margin="0,0,0,8">
-                      <Button DockPanel.Dock="Right" Content="Обзор EXE" Click="OnBrowseRealApp" Style="{StaticResource SecondaryButton}" MinWidth="110" Margin="8,0,0,0"/>
-                      <TextBox x:Name="RealAppExeBox" IsReadOnly="True" ToolTip="Полный путь к EXE"/>
-                    </DockPanel>
-                    <WrapPanel Margin="0,0,0,8">
-                      <Button Content="Временно через VPN" Click="OnApplyTempRealApp" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Удалить временное правило" Click="OnRemoveTempRealApp" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Обновить статус" Click="OnRefreshTempRealApp" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                    </WrapPanel>
-                    <TextBlock x:Name="RealAppStatusLine" TextWrapping="Wrap" FontWeight="SemiBold" Text="Статус: правило не активно"/>
-                    <TextBlock x:Name="RealAppDetailLine" TextWrapping="Wrap" Margin="0,4,0,0" Style="{StaticResource SecondaryText}" Text=""/>
-                    <TextBlock x:Name="RealAppTargetStatusLine" TextWrapping="Wrap" Margin="0,6,0,0" FontWeight="SemiBold" Text="Цель: —"/>
-                    <TextBlock Text="External IP verification: manual" Margin="0,2,0,0" Style="{StaticResource SecondaryText}" FontStyle="Italic"/>
-                    <TextBlock x:Name="RealAppQueriedAtLine" TextWrapping="Wrap" Margin="0,2,0,6" Style="{StaticResource SecondaryText}" Text=""/>
+                <TextBlock x:Name="RealAppStatusLine" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,2" Text="Статус: правило не активно"/>
+                <TextBlock x:Name="RealAppDetailLine" TextWrapping="Wrap" Style="{StaticResource SecondaryText}" FontSize="11" Text=""/>
+                <Expander Header="Дополнительные параметры" IsExpanded="False" Margin="0,6,0,6">
+                  <StackPanel Margin="0,6,0,0">
+                    <TextBlock x:Name="RealAppTargetStatusLine" TextWrapping="Wrap" FontWeight="SemiBold" FontSize="12" Text="Цель: —"/>
+                    <TextBlock x:Name="RealAppQueriedAtLine" TextWrapping="Wrap" Margin="0,2,0,6" Style="{StaticResource SecondaryText}" FontSize="11" Text=""/>
                     <DockPanel Margin="0,0,0,4">
-                      <Button DockPanel.Dock="Right" Content="Определить адреса" Click="OnResolveRealAppTarget" Style="{StaticResource SecondaryButton}" MinWidth="140" Margin="8,0,0,0"/>
+                      <Button DockPanel.Dock="Right" Content="Определить адреса" Click="OnResolveRealAppTarget" Style="{StaticResource SecondaryButton}" MinWidth="130" Margin="8,0,0,0" Padding="10,4"/>
                       <TextBox x:Name="RealAppTargetBox" Text="api.ipify.org:443" ToolTip="host:port для диагностики целевого TCP flow"/>
                     </DockPanel>
-                    <TextBlock x:Name="RealAppResolvedTargetsLine" TextWrapping="Wrap" Margin="0,0,0,6" Style="{StaticResource SecondaryText}" Text="Resolved: —"/>
+                    <TextBlock x:Name="RealAppResolvedTargetsLine" TextWrapping="Wrap" Margin="0,0,0,4" Style="{StaticResource SecondaryText}" FontSize="11" Text="Resolved: —"/>
                     <CheckBox x:Name="RealAppTargetFilterOnly" Content="Только целевой адрес" Margin="0,0,0,6" Checked="OnRealAppTargetFilterChanged" Unchecked="OnRealAppTargetFilterChanged"/>
-                    <TextBlock FontWeight="SemiBold" Text="Последние соединения выбранного приложения"/>
-                    <DataGrid x:Name="RealAppFlowGrid" Margin="0,4,0,0" Height="220" CanUserDeleteRows="False" CanUserReorderColumns="False" SelectionMode="Single">
+                    <TextBlock x:Name="RealAppAdvancedLine" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" Text=""/>
+                  </StackPanel>
+                </Expander>
+                <TextBlock Text="Последние соединения" FontWeight="SemiBold" FontSize="12" Margin="0,4,0,4"/>
+                <DataGrid x:Name="RealAppFlowGrid" Height="180" CanUserDeleteRows="False" CanUserReorderColumns="False" SelectionMode="Single">
                       <DataGrid.RowStyle>
                         <Style TargetType="DataGridRow">
                           <Style.Triggers>
@@ -687,83 +772,224 @@
                         <DataGridTextColumn Header="Route" Binding="{Binding Route}" Width="60"/>
                         <DataGridTextColumn Header="Error" Binding="{Binding Error}" Width="*"/>
                       </DataGrid.Columns>
-                    </DataGrid>
-                    <Expander Header="Advanced diagnostics" Margin="0,8,0,0">
-                      <TextBlock x:Name="RealAppAdvancedLine" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" Text=""/>
-                    </Expander>
+                </DataGrid>
+              </StackPanel>
+            </TabItem>
+            <TabItem Header="Драйвер и WFP">
+              <WrapPanel Margin="0,4,0,8">
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="OAuth localhost" FontWeight="SemiBold"/>
+                    <TextBlock Text="127.0.0.1 callback без redirect" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                    <Button Content="Запустить" Tag="loopback-local-callback" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
                   </StackPanel>
                 </Border>
-
-                <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12">
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
                   <StackPanel>
-                    <TextBlock Text="Драйвер и WFP" Style="{StaticResource SectionTitleText}" Margin="0,0,0,8"/>
-                    <WrapPanel>
-                      <Button Content="Проверить сборку WDK" Click="OnDiag" Tag="wdk-build" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Проверить бинарник драйвера" Click="OnDiag" Tag="driver-binary" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Проверить подпись драйвера" Click="OnDiag" Tag="driver-signature" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Проверить Secure Boot" Click="OnDiag" Tag="secure-boot" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Проверить test-signing" Click="OnDiag" Tag="testsigning" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Проверить HVCI" Click="OnDiag" Tag="hvci" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Установить драйвер" Click="OnDiag" Tag="driver-install" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Запустить драйвер" Click="OnDiag" Tag="driver-start" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Проверить регистрацию callout" Click="OnDiag" Tag="callout-registration" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Проверить WFP-фильтры приложений" Click="OnDiag" Tag="wfp-app-filters" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Временное правило Probe" Click="OnDiag" Tag="temp-probe-rule" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Тест прозрачной маршрутизации" Click="OnDiag" Tag="transparent-routing" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Удалить временное правило" Click="OnDiag" Tag="remove-temp-rule" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Остановить драйвер" Click="OnDiag" Tag="driver-stop" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Удалить драйвер" Click="OnDiag" Tag="driver-uninstall" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Preferred default route" Click="OnDiag" Tag="preferred-default" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Защита от петли proxy" Click="OnDiag" Tag="proxy-loop" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Родитель / дочерний процесс" Click="OnDiag" Tag="parent-child" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Защита от утечки IPv6" Click="OnDiag" Tag="ipv6-leak" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
-                      <Button Content="Убить службу (fail-open)" Click="OnDiag" Tag="kill-service" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6"/>
+                    <TextBlock Text="Packaged routing targets" FontWeight="SemiBold"/>
+                    <TextBlock Text="Primary + скрытые helper EXE и WFP для MSIX" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                    <Button Content="Запустить" Tag="packaged-routing-targets" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="WFP policy" FontWeight="SemiBold"/>
+                    <TextBlock Text="Фильтры VPN-приложений" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="wfp-app-filters" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Прозрачная маршрутизация" FontWeight="SemiBold"/>
+                    <TextBlock Text="Redirect + proxy evidence" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="transparent-routing" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Callout registration" FontWeight="SemiBold"/>
+                    <TextBlock Text="Регистрация redirect callout" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="callout-registration" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Временное правило Probe" FontWeight="SemiBold"/>
+                    <TextBlock Text="Diagnostic Probe VPN rule" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="temp-probe-rule" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Multi-app routing" FontWeight="SemiBold"/>
+                    <TextBlock Text="Изоляция нескольких VPN-приложений" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="multi-app-routing-isolation" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Unicode APP_ID" FontWeight="SemiBold"/>
+                    <TextBlock Text="Probe redirect с Unicode-путём" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="wfp-probe-unicode-redirect" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Driver health" FontWeight="SemiBold"/>
+                    <TextBlock Text="Бинарник и подпись драйвера" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <WrapPanel Margin="0,6,0,0">
+                      <Button Content="Бинарник" Tag="driver-binary" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,0" Padding="8,4"/>
+                      <Button Content="Подпись" Tag="driver-signature" Click="OnDiag" Style="{StaticResource GhostButton}" Padding="8,4"/>
                     </WrapPanel>
                   </StackPanel>
                 </Border>
-
-                <Border Style="{StaticResource CardBorder}">
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
                   <StackPanel>
-                    <DockPanel Margin="0,0,0,8">
-                      <Button DockPanel.Dock="Right" Content="&#xE8C8;" FontFamily="Segoe MDL2 Assets"
-                              ToolTip="Копировать журнал в буфер обмена" Click="OnCopyVpnLog" Style="{StaticResource GhostButton}" Padding="8,4" MinWidth="36"/>
-                      <TextBlock Text="Журнал OpenVPN" Style="{StaticResource SectionTitleText}" VerticalAlignment="Center"/>
-                    </DockPanel>
-                    <TextBox x:Name="LogBox" IsReadOnly="True" FontFamily="Consolas" Height="140"
-                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                             TextWrapping="Wrap" AcceptsReturn="True"/>
+                    <TextBlock Text="Lifecycle" FontWeight="SemiBold"/>
+                    <TextBlock Text="Очистка после VPN-сессии" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="vpn-lifecycle-cleanup-check" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
                   </StackPanel>
                 </Border>
-              </StackPanel>
-            </Expander>
-
-            <Expander x:Name="DiagLogExpander" Header="Журнал диагностики" IsExpanded="False">
-              <DockPanel Margin="0,8,0,0" MinHeight="120">
-                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button Content="&#xE8C8;" FontFamily="Segoe MDL2 Assets" ToolTip="Копировать лог в буфер обмена"
-                            Click="OnCopyDiagLog" Style="{StaticResource GhostButton}" Padding="8,4" MinWidth="36"/>
-                    <Button Content="Очистить лог" Click="OnClearDiagLog" Style="{StaticResource SecondaryButton}" MinWidth="110" Padding="10,4"/>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Proxy loop guard" FontWeight="SemiBold"/>
+                    <TextBlock Text="Защита от петли proxy" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="proxy-loop" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
                   </StackPanel>
-                </DockPanel>
-                <ListBox x:Name="DiagResults" HorizontalContentAlignment="Stretch"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto" MaxHeight="240">
-                  <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                    </Style>
-                  </ListBox.ItemContainerStyle>
-                  <ListBox.ItemTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding}" TextWrapping="Wrap"/>
-                    </DataTemplate>
-                  </ListBox.ItemTemplate>
-                </ListBox>
-              </DockPanel>
-            </Expander>
-          </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="IPv6 leak" FontWeight="SemiBold"/>
+                    <TextBlock Text="Блокировка утечки IPv6" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="ipv6-leak" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Parent / child" FontWeight="SemiBold"/>
+                    <TextBlock Text="Наследование политики процессом" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="parent-child" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Preferred default route" FontWeight="SemiBold"/>
+                    <TextBlock Text="Предпочитаемый default route" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <Button Content="Запустить" Tag="preferred-default" Click="OnDiag" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Padding="10,4"/>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Управление драйвером" FontWeight="SemiBold"/>
+                    <TextBlock Text="Install / start / stop / uninstall" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <WrapPanel Margin="0,6,0,0">
+                      <Button Content="Install" Tag="driver-install" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                      <Button Content="Start" Tag="driver-start" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                      <Button Content="Stop" Tag="driver-stop" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                      <Button Content="Uninstall" Tag="driver-uninstall" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Platform checks" FontWeight="SemiBold"/>
+                    <TextBlock Text="Secure Boot, test-signing, HVCI, WDK" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <WrapPanel Margin="0,6,0,0">
+                      <Button Content="Secure Boot" Tag="secure-boot" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                      <Button Content="Test-sign" Tag="testsigning" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                      <Button Content="HVCI" Tag="hvci" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                      <Button Content="WDK" Tag="wdk-build" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBorder}" Width="300" Margin="0,0,8,8" Padding="8">
+                  <StackPanel>
+                    <TextBlock Text="Служебные" FontWeight="SemiBold"/>
+                    <TextBlock Text="Temp rule cleanup, fail-open kill" Style="{StaticResource SecondaryText}" FontSize="11" TextWrapping="Wrap"/>
+                    <WrapPanel Margin="0,6,0,0">
+                      <Button Content="Remove temp" Tag="remove-temp-rule" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                      <Button Content="Kill service" Tag="kill-service" Click="OnDiag" Style="{StaticResource GhostButton}" Margin="0,0,4,4" Padding="8,4"/>
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+              </WrapPanel>
+            </TabItem>
+            <TabItem Header="Инструменты">
+              <StackPanel Margin="0,4,0,8">
+                <WrapPanel Margin="0,0,0,8">
+                  <Button Content="Тест очистки" Click="OnDiag" Tag="cleanup" Style="{StaticResource SecondaryButton}" Margin="0,0,6,4" Padding="10,4"/>
+                  <Button Content="Экспорт отчёта" Click="OnDiag" Tag="export" Style="{StaticResource SecondaryButton}" Margin="0,0,6,4" Padding="10,4"/>
+                </WrapPanel>
+                <Expander Header="Мастер настройки" IsExpanded="False">
+                  <StackPanel Margin="0,6,0,0">
+                    <TextBlock Text="Первое приложение" Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,4"/>
+                    <DockPanel LastChildFill="True">
+                      <Button DockPanel.Dock="Right" Content="Обзор EXE" Click="OnBrowseFirstApp" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" Padding="10,4"/>
+                      <TextBox x:Name="FirstAppBox"/>
+                    </DockPanel>
+                  </StackPanel>
+                </Expander>
+              </StackPanel>
+            </TabItem>
+          </TabControl>
         </ScrollViewer>
+            <Border x:Name="DiagResultPanel" Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,8,0,0" MinHeight="220" MaxHeight="300">
+              <DockPanel LastChildFill="True">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="Развернуть" Click="OnExpandTestCenterResult" Style="{StaticResource GhostButton}" MinWidth="96" Padding="10,4" Margin="0,0,6,0"/>
+                    <Button Content="&#xE8C8;" FontFamily="Segoe MDL2 Assets" ToolTip="Копировать результат"
+                            Click="OnCopyTestCenterResult" Style="{StaticResource GhostButton}" Padding="8,4" MinWidth="36" Margin="0,0,6,0"/>
+                    <Button Content="Очистить" Click="OnClearTestCenterResult" Style="{StaticResource SecondaryButton}" MinWidth="88" Padding="10,4"/>
+                  </StackPanel>
+                  <TextBlock x:Name="DiagResultHeadline" Text="Результат последней проверки" Style="{StaticResource SectionTitleText}" VerticalAlignment="Center"/>
+                </DockPanel>
+                <TextBox x:Name="DiagResultDetailBox" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                         MinHeight="140" MaxHeight="220" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                         TextWrapping="Wrap" AcceptsReturn="True" AcceptsTab="True" IsTabStop="True"/>
+              </DockPanel>
+            </Border>
+        </Grid>
+          </TabItem>
+          <TabItem Header="OpenVPN">
+            <DockPanel Margin="8" LastChildFill="True">
+              <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                <Button DockPanel.Dock="Right" Content="&#xE8C8;" FontFamily="Segoe MDL2 Assets"
+                        ToolTip="Копировать журнал OpenVPN" Click="OnCopyVpnLog" Style="{StaticResource GhostButton}" Padding="8,4" MinWidth="36"/>
+                <TextBlock Text="Журнал OpenVPN" Style="{StaticResource SectionTitleText}" VerticalAlignment="Center"/>
+              </DockPanel>
+              <TextBox x:Name="LogBox" IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                       MinHeight="400" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                       TextWrapping="NoWrap" AcceptsReturn="True"/>
+            </DockPanel>
+          </TabItem>
+          <TabItem Header="Журнал">
+            <DockPanel Margin="8" LastChildFill="True">
+              <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                  <Button Content="&#xE8C8;" FontFamily="Segoe MDL2 Assets" ToolTip="Копировать журнал диагностики"
+                          Click="OnCopyDiagLog" Style="{StaticResource GhostButton}" Padding="8,4" MinWidth="36" Margin="0,0,6,0"/>
+                  <Button Content="Очистить" Click="OnClearDiagLog" Style="{StaticResource SecondaryButton}" MinWidth="88" Padding="10,4"/>
+                </StackPanel>
+                <TextBlock Text="Журнал событий диагностики" Style="{StaticResource SectionTitleText}" VerticalAlignment="Center"/>
+              </DockPanel>
+              <ListBox x:Name="DiagResults" HorizontalContentAlignment="Stretch"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                       ScrollViewer.VerticalScrollBarVisibility="Auto">
+                <ListBox.ItemContainerStyle>
+                  <Style TargetType="ListBoxItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                  </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding}" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12"/>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
+          </TabItem>
+        </TabControl>
       </TabItem>
       <!-- SETTINGS -->
       <TabItem Header="Настройки">

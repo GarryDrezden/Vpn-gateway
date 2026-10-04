@@ -161,4 +161,33 @@ public sealed class WindowsSystemBootstrapProbe : ISystemBootstrapProbe
             return null;
         }
     }
+
+    public bool IsTestSigningEnabled()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        try
+        {
+            ProcessStartInfo psi = new()
+            {
+                FileName = "bcdedit.exe",
+                Arguments = "/enum {current}",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                CreateNoWindow = true,
+            };
+            using Process p = Process.Start(psi)!;
+            string output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(5000);
+            return output.Contains("testsigning", StringComparison.OrdinalIgnoreCase)
+                && output.Contains("Yes", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
 }
