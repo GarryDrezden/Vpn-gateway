@@ -15,6 +15,8 @@ SelectiveVpnRouter.Service  (LocalSystem or admin --console)
         +-- TransparentTcpProxy (127.0.0.1, SOCKS5 + WFP-redirected accepts)
         +-- WFP user-mode session (FWPM_SESSION_FLAG_DYNAMIC)
         +-- Optional KMDF callout (ALE CONNECT_REDIRECT_V4)
+        +-- Browser routing state (read-only pipe \\.\pipe\SelectiveVpnRouter.BrowserRouting,
+            consumed by the ext-vpn-route Native Messaging host; see browser-routing-service.md)
 ```
 
 ## Projects

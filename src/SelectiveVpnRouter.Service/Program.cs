@@ -28,6 +28,7 @@ HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddWindowsService(o => o.ServiceName = "SelectiveVpnRouter");
 builder.Services.AddSingleton<RouterEngine>();
 builder.Services.AddHostedService<PipeIpcHost>();
+builder.Services.AddHostedService<BrowserRoutingPipeHost>();
 if (!mode.Equals("--console", StringComparison.OrdinalIgnoreCase)
     && !Environment.UserInteractive)
 {

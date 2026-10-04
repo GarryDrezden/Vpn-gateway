@@ -25,6 +25,12 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SelectiveVpnRouter.Bootstrap", "src\SelectiveVpnRouter.Bootstrap\SelectiveVpnRouter.Bootstrap.csproj", "{7B5AB614-246C-4B45-87F5-2EA7D383947C}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SelectiveVpnRouter.BrowserRouting.Tests", "tests\SelectiveVpnRouter.BrowserRouting.Tests\SelectiveVpnRouter.BrowserRouting.Tests.csproj", "{C0D8DC98-20A1-47F3-9D84-408750D5B59D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SelectiveVpnRouter.BrowserRouting.TestHost", "tests\SelectiveVpnRouter.BrowserRouting.TestHost\SelectiveVpnRouter.BrowserRouting.TestHost.csproj", "{2D62E3F3-68AB-4092-80F1-5CDA734A6429}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -155,11 +161,37 @@ Global
 		{7B5AB614-246C-4B45-87F5-2EA7D383947C}.Release|x64.Build.0 = Release|Any CPU
 		{7B5AB614-246C-4B45-87F5-2EA7D383947C}.Release|x86.ActiveCfg = Release|Any CPU
 		{7B5AB614-246C-4B45-87F5-2EA7D383947C}.Release|x86.Build.0 = Release|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Debug|x64.Build.0 = Debug|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Debug|x86.Build.0 = Debug|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Release|x64.ActiveCfg = Release|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Release|x64.Build.0 = Release|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Release|x86.ActiveCfg = Release|Any CPU
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D}.Release|x86.Build.0 = Release|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Debug|x64.Build.0 = Debug|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Debug|x86.Build.0 = Debug|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Release|x64.ActiveCfg = Release|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Release|x64.Build.0 = Release|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Release|x86.ActiveCfg = Release|Any CPU
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{7B5AB614-246C-4B45-87F5-2EA7D383947C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{C0D8DC98-20A1-47F3-9D84-408750D5B59D} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{2D62E3F3-68AB-4092-80F1-5CDA734A6429} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

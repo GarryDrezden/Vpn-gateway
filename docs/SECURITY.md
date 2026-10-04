@@ -9,6 +9,16 @@ The product requires elevation for routing, WFP, and OpenVPN. The **GUI does not
 - ACL: FullControl for Local System and Administrators; ReadWrite for Authenticated Users; **Deny** Network SID (no remote named-pipe clients).
 - This is local-machine isolation, not a multi-user hardened service. A local non-admin can still *connect* to the pipe on a typical desktop — treat physical access as trusted, or tighten the ACL to a specific user SID in a later revision.
 
+## Browser routing pipe
+
+`\\.\pipe\SelectiveVpnRouter.BrowserRouting` is separate from the control pipe and is read-only (`getManifest`, `getPage`):
+
+- protected DACL: SYSTEM, Administrators and creator FullControl; Interactive ReadWrite; Network Deny;
+- no Everyone or Authenticated Users entries; `FirstPipeInstance`;
+- errors are bare codes.
+
+The browser's Native Messaging host can reach only this pipe, never the control commands. Details: [browser-routing-service.md](browser-routing-service.md).
+
 ## OpenVPN management interface
 
 Bound to `127.0.0.1`, ephemeral port, password file under `%ProgramData%\SelectiveVpnRouter\runtime\` with SYSTEM/Administrators ACL. Deleted on stop.

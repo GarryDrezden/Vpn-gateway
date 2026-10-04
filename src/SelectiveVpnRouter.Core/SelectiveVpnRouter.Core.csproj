@@ -4,6 +4,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="SelectiveVpnRouter.Core.Tests" />
+    <InternalsVisibleTo Include="SelectiveVpnRouter.BrowserRouting.Tests" />
   </ItemGroup>
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
