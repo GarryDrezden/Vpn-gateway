@@ -6,96 +6,17 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
-$ProductServiceName = "SelectiveVpnRouter"
-$DriverServiceName = "SelectiveVpnCallout"
-
-function Get-AcceptanceServiceSnapshot {
-    param([Parameter(Mandatory = $true)][string]$ServiceName)
-
-    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($null -eq $svc) {
-        return [pscustomobject]@{
-            Name       = $ServiceName
-            Installed  = $false
-            WasRunning = $false
-        }
-    }
-
-    return [pscustomobject]@{
-        Name       = $ServiceName
-        Installed  = $true
-        WasRunning = ($svc.Status -eq "Running")
-    }
-}
-
-function Stop-AcceptanceWindowsService {
-    param([Parameter(Mandatory = $true)][string]$ServiceName)
-
-    $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($null -eq $existing) { return }
-    if ($existing.Status -eq "Stopped") { return }
-
-    try {
-        Stop-Service -Name $ServiceName -Force -ErrorAction Stop
-    }
-    catch {
-        & sc.exe stop $ServiceName | Out-Null
-    }
-
-    try {
-        $existing.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(45))
-    }
-    catch {
-        throw "Could not stop service '$ServiceName' within 45s."
-    }
-}
-
-function Start-AcceptanceWindowsService {
-    param([Parameter(Mandatory = $true)][string]$ServiceName)
-
-    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($null -eq $svc) {
-        throw "Cannot start '$ServiceName': service is not installed."
-    }
-
-    if ($svc.Status -eq "Running") {
-        return
-    }
-
-    try {
-        Start-Service -Name $ServiceName -ErrorAction Stop
-    }
-    catch {
-        & sc.exe start $ServiceName | Out-Null
-    }
-
-    try {
-        $svc.WaitForStatus("Running", [TimeSpan]::FromSeconds(45))
-    }
-    catch {
-        throw "Service '$ServiceName' did not reach Running within 45s."
-    }
-}
+. (Join-Path $PSScriptRoot "_common.ps1")
 
 $ZipPath = (Resolve-Path -LiteralPath $ZipPath).Path
 $TargetFolder = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TargetFolder)
 
-$snapProduct = Get-AcceptanceServiceSnapshot -ServiceName $ProductServiceName
-$snapDriver = Get-AcceptanceServiceSnapshot -ServiceName $DriverServiceName
-
+$snapshot = Get-SvrPublishRuntimeSnapshot
 Write-Host "Pre-cleanup snapshot:"
-Write-Host ("  {0}: installed={1} wasRunning={2}" -f $snapProduct.Name, $snapProduct.Installed, $snapProduct.WasRunning)
-Write-Host ("  {0}: installed={1} wasRunning={2}" -f $snapDriver.Name, $snapDriver.Installed, $snapDriver.WasRunning)
+Write-Host ("  SelectiveVpnRouter: installed=$($snapshot.ProductInstalled) wasRunning=$($snapshot.ProductWasRunning)")
+Write-Host ("  SelectiveVpnCallout: installed=$($snapshot.DriverInstalled) wasRunning=$($snapshot.DriverWasRunning)")
 
-$procs = @("SelectiveVpnRouter.App", "SelectiveVpnRouter.Bootstrap", "SelectiveVpnRouter.Service")
-foreach ($name in $procs) {
-    Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-}
-
-Stop-AcceptanceWindowsService -ServiceName $ProductServiceName
-Stop-AcceptanceWindowsService -ServiceName $DriverServiceName
-
+Stop-SvrPublishRuntimeForTreeSwap -PublishDir $TargetFolder
 Start-Sleep -Seconds 1
 
 if (Test-Path -LiteralPath $TargetFolder) {
@@ -111,29 +32,16 @@ Expand-Archive -LiteralPath $ZipPath -DestinationPath $TargetFolder -Force
 
 Write-Host "Expanded $ZipPath -> $TargetFolder"
 
-$restoredProduct = $false
-if ($snapDriver.Installed -and $snapDriver.WasRunning) {
-    Write-Host "Restoring previous running state: $DriverServiceName"
-    Start-AcceptanceWindowsService -ServiceName $DriverServiceName
-}
+Repair-SvrPublishRuntimeImagePaths -PublishDir $TargetFolder
+Restore-SvrPublishRuntimeFromSnapshot -Snapshot $snapshot -PublishDir $TargetFolder
 
-if ($snapProduct.Installed -and $snapProduct.WasRunning) {
-    Write-Host "Restoring previous running state: $ProductServiceName"
-    Start-AcceptanceWindowsService -ServiceName $ProductServiceName
-    $restoredProduct = $true
-
-    $helpersPath = Join-Path $PSScriptRoot "_update-helpers.ps1"
-    if (-not (Test-Path -LiteralPath $helpersPath)) {
-        throw "Missing IPC helpers: $helpersPath"
-    }
-
-    . $helpersPath
-
+$restoredProduct = $snapshot.ProductInstalled -and $snapshot.ProductWasRunning
+if ($restoredProduct) {
     $ipcReady = Wait-SvrIpcGetStatusReady -TimeoutSeconds 15 -PollIntervalMs 250 -StatusTimeoutMs 3000
     if (-not $ipcReady.Ready) {
         $detail = if ($ipcReady.LastError) { $ipcReady.LastError } else { "GetStatus not ready" }
         throw (
-            "IPC readiness failed after restarting $ProductServiceName " +
+            "IPC readiness failed after restarting SelectiveVpnRouter " +
             "(attempts=$($ipcReady.Attempts), nonRetryable=$($ipcReady.NonRetryable)): $detail"
         )
     }
@@ -167,13 +75,13 @@ Write-Host $statusJson
 
 $status = $statusJson | ConvertFrom-Json
 
-if ($snapProduct.Installed -and $snapProduct.WasRunning) {
+if ($snapshot.ProductInstalled -and $snapshot.ProductWasRunning) {
     if (-not $status.serviceRunning) {
         throw "Bootstrap status: serviceRunning=false after restore (expected true)."
     }
 }
 
-$expectReady = $snapProduct.Installed -and $snapProduct.WasRunning -and $snapDriver.Installed
+$expectReady = $snapshot.ProductInstalled -and $snapshot.ProductWasRunning -and $snapshot.DriverInstalled
 if ($expectReady) {
     if ($status.bootstrapState -ne "Ready") {
         throw (

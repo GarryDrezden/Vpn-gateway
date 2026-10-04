@@ -25,7 +25,7 @@ $publishScript = Join-Path $PSScriptRoot "publish-desktop.ps1"
 $script:deployBackedUp = $false
 $script:deployLiveUpdated = $false
 $script:deployRetiredPath = $null
-$script:serviceExisted = $false
+$script:deployRuntimeSnapshot = $null
 
 function Wait-ServiceStatus {
     param(
@@ -44,9 +44,10 @@ function Invoke-SvrDeploySwap {
     }
 
     try {
-        Stop-AllSvrGuiProcesses -TimeoutSeconds 10
-        $script:serviceExisted = Stop-SvrServiceForPublish -ServiceName $serviceName -TimeoutSeconds 15
-        Stop-SvrPublishOrphanProcesses -PublishDir $liveDir -TimeoutSeconds 10
+        $script:deployRuntimeSnapshot = Get-SvrPublishRuntimeSnapshot
+        Write-SvrPublishRuntimeSnapshot -Snapshot $script:deployRuntimeSnapshot
+
+        Stop-SvrPublishRuntimeForTreeSwap -PublishDir $liveDir
         Wait-SvrPublishDirectoryUnlocked -PublishDir $liveDir -TimeoutSeconds 20
         Remove-SvrRetiredPublishDirectories -ParentDir (Split-Path $liveDir -Parent)
         Write-SvrUpdateLogLine "publish-lock-check: live publish directory unlocked"
@@ -81,7 +82,8 @@ function Invoke-SvrDeploySwap {
         $script:deployRetiredPath = Invoke-SvrPromotePublishDirectory -Source $stagingDir -Destination $liveDir -RecreateSource
         $script:deployLiveUpdated = $true
 
-        Start-SvrPublishedService -ServiceName $serviceName -ServiceExe $serviceExe
+        Repair-SvrPublishRuntimeImagePaths -PublishDir $liveDir -Snapshot $script:deployRuntimeSnapshot
+        Restore-SvrPublishRuntimeFromSnapshot -Snapshot $script:deployRuntimeSnapshot -PublishDir $liveDir
         Remove-SvrRetiredPublishDirectories -ParentDir (Split-Path $liveDir -Parent)
     }
     catch {
@@ -96,8 +98,9 @@ function Invoke-SvrDeploySwap {
 function Invoke-SvrDeployRollback {
     Write-SvrUpdateLogLine "Attempting rollback to previous publish"
     try {
-        Stop-AllSvrGuiProcesses -TimeoutSeconds 10 | Out-Null
-        Stop-SvrServiceForPublish -ServiceName $serviceName -TimeoutSeconds 15 | Out-Null
+        $snapshot = if ($script:deployRuntimeSnapshot) { $script:deployRuntimeSnapshot } else { Get-SvrPublishRuntimeSnapshot }
+
+        Stop-SvrPublishRuntimeForTreeSwap -PublishDir $liveDir
 
         if ((Test-Path -LiteralPath $prevDir) -and ($script:deployBackedUp -or $script:deployLiveUpdated)) {
             Write-SvrUpdateLogLine "Restoring previous publish from backup"
@@ -105,8 +108,9 @@ function Invoke-SvrDeployRollback {
         }
 
         if ((Test-Path -LiteralPath $liveDir) -and (Test-Path -LiteralPath (Join-Path $liveDir "SelectiveVpnRouter.Service.exe"))) {
-            $rollbackService = Join-Path $liveDir "SelectiveVpnRouter.Service.exe"
-            Start-SvrPublishedService -ServiceName $serviceName -ServiceExe $rollbackService
+            Restore-SvrPublishDriverImagePathFromSnapshot -Snapshot $snapshot
+            Repair-SvrPublishRuntimeImagePaths -PublishDir $liveDir -Snapshot $snapshot
+            Restore-SvrPublishRuntimeFromSnapshot -Snapshot $snapshot -PublishDir $liveDir
             Add-SvrStepResult -Name "rollback" -Outcome PASS -Label "rollback"
             Write-SvrUpdateLogLine "Rollback completed"
             return $true
@@ -163,27 +167,34 @@ try {
         exit 1
     }
 
-    Write-SvrUpdateLogLine "=== STEP service-ready ==="
-    $global:SvrCurrentStage = "service-ready"
-    if (-not $global:SvrStageOutputs.ContainsKey("service-ready")) {
-        $global:SvrStageOutputs["service-ready"] = ""
-    }
-    try {
-        Wait-SvrIpcReady -ServiceName $serviceName -TimeoutSeconds 15 -PollIntervalMs 250
-    }
-    catch {
-        Add-SvrStageOutput $_.Exception.Message
-        Add-SvrStepResult -Name "service-ready" -Outcome FAIL -Label "service-ready"
-        Write-SvrCompactConsole -FailedStep "service-ready" -FailedMessage $_.Exception.Message
-        exit 1
-    }
-    finally {
-        $global:SvrCurrentStage = $null
-    }
+    if ($script:deployRuntimeSnapshot -and $script:deployRuntimeSnapshot.ProductWasRunning) {
+        Write-SvrUpdateLogLine "=== STEP service-ready ==="
+        $global:SvrCurrentStage = "service-ready"
+        if (-not $global:SvrStageOutputs.ContainsKey("service-ready")) {
+            $global:SvrStageOutputs["service-ready"] = ""
+        }
+        try {
+            Wait-SvrIpcReady -ServiceName $serviceName -TimeoutSeconds 15 -PollIntervalMs 250
+        }
+        catch {
+            Add-SvrStageOutput $_.Exception.Message
+            Add-SvrStepResult -Name "service-ready" -Outcome FAIL -Label "service-ready"
+            Write-SvrCompactConsole -FailedStep "service-ready" -FailedMessage $_.Exception.Message
+            exit 1
+        }
+        finally {
+            $global:SvrCurrentStage = $null
+        }
 
-    $svc = Get-Service -Name $serviceName -ErrorAction Stop
-    $serviceDetail = if ($svc.Status -eq "Running") { "Running" } else { $svc.Status.ToString() }
-    Add-SvrStepResult -Name "service" -Outcome PASS -Label "service" -Detail $serviceDetail
+        $svc = Get-Service -Name $serviceName -ErrorAction Stop
+        $serviceDetail = if ($svc.Status -eq "Running") { "Running" } else { $svc.Status.ToString() }
+        Add-SvrStepResult -Name "service" -Outcome PASS -Label "service" -Detail $serviceDetail
+    }
+    else {
+        Write-SvrUpdateLogLine "service-ready: skipped (product service was not running before deploy)"
+        Add-SvrStepResult -Name "service-ready" -Outcome SKIP -Label "service-ready" -Detail "preserved-stopped"
+        Add-SvrStepResult -Name "service" -Outcome SKIP -Label "service" -Detail "Stopped"
+    }
 
     $iconIco = Join-Path $root "assets\branding\vpn-route-icon.ico"
     if (-not (Test-Path -LiteralPath $iconIco)) {
@@ -196,8 +207,13 @@ try {
     Update-VpnRouteDesktopShortcuts -AppExe $appExe -ProductName "VPN Route" -IconPath $iconIco
 
     Invoke-SvrStep -Name "smoke" -PassLabel "smoke" -Action {
+        Test-SvrPublishRuntimeLayout -PublishDir $liveDir
+
         Invoke-SvrCaptureScript -FilePath (Join-Path $PSScriptRoot "smoke-network-catalog.ps1") `
             -ArgumentList @("-ProbePath", $probeExe, "-Quiet") | Out-Null
+
+        Invoke-SvrCaptureScript -FilePath (Join-Path $PSScriptRoot "smoke-app-publish.ps1") `
+            -ArgumentList @("-PublishDir", $liveDir, "-Quiet") | Out-Null
 
         Write-SvrUpdateLogLine "=== STEP routing-fast ==="
         Invoke-SvrCaptureScript -FilePath (Join-Path $PSScriptRoot "test-routing-fast.ps1") `

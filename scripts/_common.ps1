@@ -173,11 +173,31 @@ function Test-SvrWdk {
     }
 }
 
+function Get-SvrDriverStagingSysPath {
+    param(
+        [string]$Root = (Get-SvrRepoRoot),
+        [ValidateSet("Release", "Debug")]
+        [string]$Configuration = "Release"
+    )
+    return Join-Path $Root "artifacts\driver\staging\$Configuration\SelectiveVpnCallout.sys"
+}
+
+function Get-SvrDriverRuntimeSysPath {
+    param([string]$Root = (Get-SvrRepoRoot))
+    return Join-Path (Get-SvrPublishDirectory -Root $Root) "driver\SelectiveVpnCallout.sys"
+}
+
 function Get-SvrDefaultSysPath {
     $root = Get-SvrRepoRoot
     foreach ($cfg in @("Release", "Debug")) {
-        $p = Join-Path $root "artifacts\driver\$cfg\SelectiveVpnCallout.sys"
-        if (Test-Path $p) { return $p }
+        $p = Get-SvrDriverStagingSysPath -Root $root -Configuration $cfg
+        if (Test-Path -LiteralPath $p) { return $p }
+    }
+    $runtime = Get-SvrDriverRuntimeSysPath -Root $root
+    if (Test-Path -LiteralPath $runtime) { return $runtime }
+    foreach ($cfg in @("Release", "Debug")) {
+        $legacy = Join-Path $root "artifacts\driver\$cfg\SelectiveVpnCallout.sys"
+        if (Test-Path -LiteralPath $legacy) { return $legacy }
     }
     $sys32 = Join-Path $env:SystemRoot "System32\drivers\SelectiveVpnCallout.sys"
     if (Test-Path $sys32) { return $sys32 }
@@ -541,6 +561,9 @@ function Remove-SvrRetiredPublishDirectories {
         $_.Name -like "$LeafName.retired-*"
     })) {
         Write-SvrUpdateLogLine "publish-cleanup: removing retired $($dir.FullName)"
+        if (Get-Command Stop-SvrCalloutDriverIfBlockingDirectory -ErrorAction SilentlyContinue) {
+            Stop-SvrCalloutDriverIfBlockingDirectory -Directory $dir.FullName -PublishParentDir $ParentDir
+        }
         Remove-DirectoryWithRetry -Path $dir.FullName -PublishDir $dir.FullName
     }
 }
@@ -638,6 +661,10 @@ function Invoke-SvrRestorePublishFromBackup {
 
     if (-not (Test-Path -LiteralPath $BackupDir)) {
         throw "publish backup not found: $BackupDir"
+    }
+
+    if (Get-Command Stop-SvrPublishRuntimeForTreeSwap -ErrorAction SilentlyContinue) {
+        Stop-SvrPublishRuntimeForTreeSwap -PublishDir $LiveDir
     }
 
     Wait-SvrPublishDirectoryUnlocked -PublishDir $LiveDir -TimeoutSeconds 20
@@ -798,3 +825,4 @@ function Update-VpnRouteDesktopShortcuts {
 }
 
 . (Join-Path $PSScriptRoot "_update-helpers.ps1")
+. (Join-Path $PSScriptRoot "svr-publish-runtime-lifecycle.ps1")

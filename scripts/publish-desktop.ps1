@@ -1,4 +1,4 @@
-# Publish portable desktop folder: App + Service + Probe (Release, win-x64, framework-dependent).
+# Publish dev desktop runtime folder: App + Service + Probe + Bootstrap + driver + manifest.
 
 param(
     [string]$OutputDirectory = "",
@@ -58,6 +58,11 @@ function Publish-Project {
 Publish-Project -ProjectPath (Join-Path $root "src\SelectiveVpnRouter.App\SelectiveVpnRouter.App.csproj") -Label "SelectiveVpnRouter.App"
 Publish-Project -ProjectPath (Join-Path $root "src\SelectiveVpnRouter.Service\SelectiveVpnRouter.Service.csproj") -Label "SelectiveVpnRouter.Service"
 Publish-Project -ProjectPath (Join-Path $root "src\SelectiveVpnRouter.Probe\SelectiveVpnRouter.Probe.csproj") -Label "SelectiveVpnRouter.Probe"
+Publish-Project -ProjectPath (Join-Path $root "src\SelectiveVpnRouter.Bootstrap\SelectiveVpnRouter.Bootstrap.csproj") -Label "SelectiveVpnRouter.Bootstrap"
+
+. (Join-Path $PSScriptRoot "portable-package-files.ps1")
+Ensure-SvrPortableDriverLayout -LayoutRoot $out -RepoRoot $root
+Write-SvrPortableManifestForLayout -LayoutRoot $out -RepoRoot $root
 
 $appExe = Join-Path $out "SelectiveVpnRouter.App.exe"
 if ((Test-Path $embed) -and (Test-Path $ico) -and (Test-Path $appExe)) {

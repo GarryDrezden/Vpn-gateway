@@ -45,7 +45,7 @@ foreach ($proj in $projects) {
 
 $driverDir = Join-Path $stage "driver"
 New-Item -ItemType Directory -Path $driverDir -Force | Out-Null
-$sysSrc = Join-Path $root "artifacts\driver\Release\SelectiveVpnCallout.sys"
+$sysSrc = Get-SvrDriverStagingSysPath -Root $root -Configuration Release
 if (-not (Test-Path $sysSrc)) {
     Write-Host "driver sys missing; running build-driver.ps1"
     & (Join-Path $PSScriptRoot "build-driver.ps1")
@@ -54,7 +54,7 @@ if (-not (Test-Path $sysSrc)) {
 Copy-Item -LiteralPath $sysSrc -Destination (Join-Path $driverDir "SelectiveVpnCallout.sys") -Force
 $infSrc = Join-Path $root "driver\SelectiveVpnCallout\SelectiveVpnCallout.inf"
 Copy-Item -LiteralPath $infSrc -Destination (Join-Path $driverDir "SelectiveVpnCallout.inf") -Force
-$catSrc = Join-Path $root "artifacts\driver\Release\SelectiveVpnCallout.cat"
+$catSrc = Join-Path $root "artifacts\driver\staging\Release\SelectiveVpnCallout.cat"
 if (Test-Path $catSrc) {
     Copy-Item -LiteralPath $catSrc -Destination (Join-Path $driverDir "SelectiveVpnCallout.cat") -Force
 }

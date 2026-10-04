@@ -456,19 +456,26 @@ function Write-SvrUpdateSummary {
     Write-SvrCompactConsole -Success:$Success
 }
 
+function Test-SvrPublishRuntimeLayout {
+    param([Parameter(Mandatory = $true)][string]$PublishDir)
+
+    $probeExe = Join-Path $PublishDir "SelectiveVpnRouter.Probe.exe"
+    if (-not (Test-Path -LiteralPath $probeExe)) {
+        throw "publish-layout: SelectiveVpnRouter.Probe.exe missing (cannot validate runtime layout)"
+    }
+
+    $output = & $probeExe --validate-publish-layout $PublishDir 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $detail = ($output | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($detail)) { $detail = "exit code $LASTEXITCODE" }
+        throw "publish-layout: $detail"
+    }
+}
+
 function Test-SvrStagingPublish {
     param([Parameter(Mandatory = $true)][string]$StagingDir)
 
-    $required = @(
-        "SelectiveVpnRouter.App.exe",
-        "SelectiveVpnRouter.Service.exe",
-        "SelectiveVpnRouter.Probe.exe"
-    )
-
-    $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $StagingDir $_)) })
-    if ($missing.Count -gt 0) {
-        throw "staging publish missing required files: $($missing -join ', ')"
-    }
+    Test-SvrPublishRuntimeLayout -PublishDir $StagingDir
 }
 
 function Test-SvrNamedPipeExists {
