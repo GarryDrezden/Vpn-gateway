@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Core.RoutingTrace;
 
 namespace SelectiveVpnRouter.Service;
 
@@ -141,6 +142,13 @@ public sealed class PipeIpcHost : BackgroundService
                 IpcMethods.GetTempAppVpnFlows => GetTempAppFlows(req.PayloadJson),
                 IpcMethods.ApplyTempAppVpnRoute => await ApplyTempAppRoute(req.PayloadJson).ConfigureAwait(false),
                 IpcMethods.RemoveTempAppVpnRoute => await RemoveTempAppRoute().ConfigureAwait(false),
+                IpcMethods.StartRoutingTrace => StartRoutingTrace(req.PayloadJson),
+                IpcMethods.GetRoutingTraceStatus => JsonSerializer.Serialize(_engine.GetRoutingTraceStatus(), ConfigSerializer.JsonOptions),
+                IpcMethods.GetRoutingTraceSnapshot => JsonSerializer.Serialize(_engine.GetRoutingTraceSnapshot(), ConfigSerializer.JsonOptions),
+                IpcMethods.GetRoutingTraceEvents => GetRoutingTraceEvents(req.PayloadJson),
+                IpcMethods.StopRoutingTrace => JsonSerializer.Serialize(_engine.StopRoutingTrace(), ConfigSerializer.JsonOptions),
+                IpcMethods.ClearRoutingTrace => ClearRoutingTrace(),
+                IpcMethods.ExportRoutingTrace => ExportRoutingTrace(req.PayloadJson),
                 _ => throw new InvalidOperationException("Unknown method " + req.Method),
             };
             return new IpcResponse { Id = req.Id, Ok = true, PayloadJson = payload };
@@ -276,6 +284,50 @@ public sealed class PipeIpcHost : BackgroundService
     {
         TempAppVpnStatus status = await _engine.RemoveTempAppVpnRouteAsync().ConfigureAwait(false);
         return JsonSerializer.Serialize(status, ConfigSerializer.JsonOptions);
+    }
+
+    private string StartRoutingTrace(string? json)
+    {
+        StartRoutingTraceRequest req = JsonSerializer.Deserialize<StartRoutingTraceRequest>(json ?? "{}", ConfigSerializer.JsonOptions)
+            ?? throw new InvalidOperationException("Invalid routing trace start request.");
+        RoutingTraceSession session = _engine.StartRoutingTrace(req);
+        return JsonSerializer.Serialize(session, ConfigSerializer.JsonOptions);
+    }
+
+    private string GetRoutingTraceEvents(string? json)
+    {
+        GetRoutingTraceEventsRequest req = JsonSerializer.Deserialize<GetRoutingTraceEventsRequest>(json ?? "{}", ConfigSerializer.JsonOptions)
+            ?? throw new InvalidOperationException("Invalid routing trace events request.");
+        RoutingTraceEventsPage page = _engine.GetRoutingTraceEvents(req);
+        return JsonSerializer.Serialize(page, ConfigSerializer.JsonOptions);
+    }
+
+    private string ClearRoutingTrace()
+    {
+        if (!_engine.TryClearRoutingTrace(out string? errorCode))
+        {
+            return JsonSerializer.Serialize(new { error = errorCode ?? "trace_active" }, ConfigSerializer.JsonOptions);
+        }
+
+        return "{}";
+    }
+
+    private string ExportRoutingTrace(string? json)
+    {
+        string format = "text";
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            using JsonDocument doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("format", out JsonElement f))
+            {
+                format = f.GetString() ?? "text";
+            }
+        }
+
+        string report = string.Equals(format, "json", StringComparison.OrdinalIgnoreCase)
+            ? _engine.ExportRoutingTraceJson()
+            : _engine.ExportRoutingTraceText();
+        return JsonSerializer.Serialize(new { format, report }, ConfigSerializer.JsonOptions);
     }
 
     private static NamedPipeServerStream CreatePipe()

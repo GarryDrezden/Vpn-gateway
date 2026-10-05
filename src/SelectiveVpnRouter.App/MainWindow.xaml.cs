@@ -14,6 +14,7 @@ using Microsoft.Win32;
 using SelectiveVpnRouter.Core;
 using SelectiveVpnRouter.Core.ApplicationDiscovery;
 using SelectiveVpnRouter.Core.Portable;
+using SelectiveVpnRouter.Core.RoutingTrace;
 using Forms = System.Windows.Forms;
 using MessageBox = System.Windows.MessageBox;
 using Window = System.Windows.Window;
@@ -54,6 +55,14 @@ public partial class MainWindow : Window
     private readonly ApplicationDiscoveryCoordinator _appDiscovery = new();
     private bool _installedDiscoveryLoaded;
     private string _lastDiagRaw = string.Empty;
+    private enum RoutingTraceUiPhase { Idle, Starting, Active, Stopping, Completed }
+
+    private RoutingTraceUiPhase _routingTracePhase = RoutingTraceUiPhase.Idle;
+    private Guid? _routingTracePollSessionId;
+    private long _routingTraceAfterSequence;
+    private string _routingTraceLastReport = string.Empty;
+    private readonly ObservableCollection<RoutingTraceEventRow> _routingTraceRows = [];
+    private readonly Dictionary<Guid, RoutingTraceEventRow> _routingTraceRowIndex = new();
 
     public MainWindow()
     {
@@ -71,6 +80,7 @@ public partial class MainWindow : Window
         _appDiscovery.SelectionCountsChanged += () => Dispatcher.Invoke(UpdateDiscoverySelectionBars);
         RulesGrid.ItemsSource = _advancedRules;
         RealAppFlowGrid.ItemsSource = _realAppFlows;
+        RoutingTraceGrid.ItemsSource = _routingTraceRows;
         ConnectionGroupsList.ItemsSource = _connectionGroups;
         ConnectionRecentGroupsList.ItemsSource = _connectionRecentGroups;
         FlowSearchBox.TextChanged += (_, _) =>
@@ -256,6 +266,7 @@ public partial class MainWindow : Window
             LogBox.Text = string.Join(Environment.NewLine, snap.Vpn.RecentLog);
             _tray.Text = vpnConnected ? AppBranding.ProductName + " — подключён" : AppBranding.ProductName + " — отключён";
             await RefreshTempRealAppStatusAsync();
+            await ReconcileRoutingTraceAsync(pollEvents: _routingTracePhase == RoutingTraceUiPhase.Active);
         }
         catch (Exception)
         {
@@ -1065,6 +1076,7 @@ public partial class MainWindow : Window
         _advancedRules.Clear();
         foreach (RoutingRule r in cfg.Rules.Where(r => r.Type != RuleType.Application)) { _advancedRules.Add(RuleRow.From(r)); }
         RefreshAppsFilter();
+        RoutingTraceRuleCombo.ItemsSource = ApplicationRulesHelper.GetPermanentApplicationRules(cfg).ToList();
     }
 
     private AppConfiguration ReadConfigFromUi()
@@ -1981,6 +1993,323 @@ public partial class MainWindow : Window
 
         e.Cancel = true;
         Hide();
+    }
+
+    private void OnRoutingTraceRuleSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (RoutingTraceRuleCombo.SelectedItem is RoutingRule rule)
+        {
+            RoutingTraceTargetBox.Text = rule.Target;
+        }
+    }
+
+    private void OnBrowseRoutingTraceTarget(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog { Filter = "Executable|*.exe", Title = "Выберите приложение для мониторинга" };
+        if (dlg.ShowDialog() == true)
+        {
+            RoutingTraceTargetBox.Text = dlg.FileName;
+            RoutingTraceRuleCombo.SelectedItem = null;
+        }
+    }
+
+    private async void OnStartRoutingTrace(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Guid? ruleId = RoutingTraceRuleCombo.SelectedItem is RoutingRule r ? r.Id : null;
+            string? exe = string.IsNullOrWhiteSpace(RoutingTraceTargetBox.Text) ? null : RoutingTraceTargetBox.Text.Trim();
+            if (ruleId is null && string.IsNullOrWhiteSpace(exe))
+            {
+                MessageBox.Show(this, "???????? ??????? ??? EXE.", AppBranding.ProductName, MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            _routingTracePhase = RoutingTraceUiPhase.Starting;
+            ApplyRoutingTraceControls(null);
+
+            bool udpIpv6 = RoutingTraceIncludeUdpIpv6.IsChecked == true;
+            var options = new RoutingTraceOptions
+            {
+                FollowChildProcesses = RoutingTraceFollowChildren.IsChecked == true,
+                IncludeUdp = udpIpv6,
+                IncludeIpv6 = udpIpv6,
+            };
+            RoutingTraceSession? session = await _client.SendOkAsync<RoutingTraceSession>(
+                IpcMethods.StartRoutingTrace,
+                new StartRoutingTraceRequest { RuleId = ruleId, ExecutablePath = exe, Options = options },
+                _cts.Token);
+            if (session is null)
+            {
+                _routingTracePhase = RoutingTraceUiPhase.Idle;
+                ApplyRoutingTraceControls(null);
+                return;
+            }
+
+            _routingTracePollSessionId = session.SessionId;
+            _routingTraceAfterSequence = 0;
+            _routingTraceRows.Clear();
+            _routingTraceRowIndex.Clear();
+            _routingTraceLastReport = string.Empty;
+            _routingTracePhase = RoutingTraceUiPhase.Active;
+            await ReconcileRoutingTraceAsync(pollEvents: true);
+        }
+        catch (Exception ex)
+        {
+            _routingTracePhase = RoutingTraceUiPhase.Idle;
+            ApplyRoutingTraceControls(null);
+            if (!IsBenignRoutingTraceError(ex))
+            {
+                MessageBox.Show(this, ex.Message, AppBranding.ProductName, MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+    }
+
+    private async void OnStopRoutingTrace(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _routingTracePhase = RoutingTraceUiPhase.Stopping;
+            ApplyRoutingTraceControls(null);
+            RoutingTraceSession? session = await _client.SendOkAsync<RoutingTraceSession>(IpcMethods.StopRoutingTrace, null, _cts.Token);
+            _routingTracePhase = RoutingTraceUiPhase.Completed;
+            _routingTracePollSessionId = session?.SessionId;
+            if (session is not null)
+            {
+                await RefreshRoutingTraceSnapshotAsync(session);
+                try
+                {
+                    _routingTraceLastReport = await FetchRoutingTraceReportAsync("text");
+                }
+                catch
+                {
+                    _routingTraceLastReport = string.Empty;
+                }
+            }
+
+            await ReconcileRoutingTraceAsync(pollEvents: false);
+        }
+        catch (Exception ex)
+        {
+            _routingTracePhase = RoutingTraceUiPhase.Idle;
+            await ReconcileRoutingTraceAsync(pollEvents: false);
+            if (!IsBenignRoutingTraceError(ex))
+            {
+                MessageBox.Show(this, ex.Message, AppBranding.ProductName, MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+    }
+
+    private async Task ReconcileRoutingTraceAsync(bool pollEvents)
+    {
+        RoutingTraceStatus? status = await _client.SendOkAsync<RoutingTraceStatus>(
+            IpcMethods.GetRoutingTraceStatus,
+            null,
+            _cts.Token);
+        if (status is null)
+        {
+            return;
+        }
+
+        if (status.Active)
+        {
+            _routingTracePhase = RoutingTraceUiPhase.Active;
+            _routingTracePollSessionId = status.ActiveSessionId;
+        }
+        else if (_routingTracePhase is RoutingTraceUiPhase.Starting or RoutingTraceUiPhase.Stopping)
+        {
+            // keep transitional phase until caller settles
+        }
+        else if (status.HasCompletedSession)
+        {
+            _routingTracePhase = RoutingTraceUiPhase.Completed;
+            _routingTracePollSessionId = status.CompletedSessionId;
+        }
+        else if (_routingTracePhase == RoutingTraceUiPhase.Active)
+        {
+            _routingTracePhase = RoutingTraceUiPhase.Idle;
+            RoutingTraceStatusLine.Text = RoutingTraceUiText.MonitoringEndedNoActiveSession;
+        }
+        else if (_routingTracePhase != RoutingTraceUiPhase.Stopping)
+        {
+            _routingTracePhase = RoutingTraceUiPhase.Idle;
+        }
+
+        ApplyRoutingTraceControls(status);
+        UpdateRoutingTraceStatusLine(status);
+
+        if (pollEvents && status.Active && status.ActiveSessionId is Guid activeId)
+        {
+            await PollRoutingTraceEventsAsync(activeId);
+        }
+        else if (pollEvents && !status.Active && status.HasCompletedSession && status.CompletedSessionId is Guid completedId)
+        {
+            await PollRoutingTraceEventsAsync(completedId);
+        }
+
+        await RefreshRoutingTraceSnapshotAsync();
+    }
+
+    private void ApplyRoutingTraceControls(RoutingTraceStatus? status)
+    {
+        bool active = status?.Active == true || _routingTracePhase == RoutingTraceUiPhase.Active;
+        bool completed = status?.HasCompletedSession == true || _routingTracePhase == RoutingTraceUiPhase.Completed;
+        bool busy = _routingTracePhase is RoutingTraceUiPhase.Starting or RoutingTraceUiPhase.Stopping;
+
+        RoutingTraceStartBtn.IsEnabled = !active && !busy;
+        RoutingTraceStopBtn.IsEnabled = active && !busy;
+        RoutingTraceBrowseBtn.IsEnabled = !active && !busy;
+        RoutingTraceRuleCombo.IsEnabled = !active && !busy;
+        RoutingTraceCopyBtn.IsEnabled = completed && !active;
+        RoutingTraceExportBtn.IsEnabled = completed && !active;
+    }
+
+    private void UpdateRoutingTraceStatusLine(RoutingTraceStatus status)
+    {
+        if (status.Active && status.ActiveStartedAt is DateTimeOffset started)
+        {
+            TimeSpan elapsed = DateTimeOffset.UtcNow - started;
+            RoutingTraceStatusLine.Text = RoutingTraceUiText.FormatActiveMonitoring(elapsed, status.ActiveTargetName);
+            return;
+        }
+
+        if (status.HasCompletedSession)
+        {
+            DateTimeOffset completedStart = status.CompletedStartedAt ?? status.CompletedStoppedAt ?? DateTimeOffset.UtcNow;
+            DateTimeOffset completedStop = status.CompletedStoppedAt ?? DateTimeOffset.UtcNow;
+            TimeSpan duration = completedStop - completedStart;
+            RoutingTraceStatusLine.Text = RoutingTraceUiText.FormatCompletedReport(duration, status.CompletedTargetName);
+        }
+        else if (_routingTracePhase == RoutingTraceUiPhase.Idle)
+        {
+            RoutingTraceStatusLine.Text = RoutingTraceUiText.MonitoringNotStarted;
+        }
+    }
+
+    private async Task RefreshRoutingTraceSnapshotAsync(RoutingTraceSession? sessionOverride = null)
+    {
+        RoutingTraceSnapshot? snap = await _client.SendOkAsync<RoutingTraceSnapshot>(IpcMethods.GetRoutingTraceSnapshot, null, _cts.Token);
+        RoutingTraceSession? session = sessionOverride ?? snap?.Session;
+        if (session is null)
+        {
+            return;
+        }
+
+        RoutingTraceLiveCounters c = session.LiveCounters;
+        RoutingTraceCountersLine.Text =
+            $"TCP/IPv4 VPN {c.TcpIpv4Vpn}  Historical {c.TcpIpv4Historical}  NoProxy {c.TcpIpv4MissingProxy}  UNCOVERED UDP/4 {c.UdpIpv4Uncovered}  TCP/6 {c.TcpIpv6Uncovered}  UDP/6 {c.UdpIpv6Uncovered}  Leaks {c.ConfirmedLeaks}";
+    }
+
+    private async Task PollRoutingTraceEventsAsync(Guid sessionId)
+    {
+        try
+        {
+            RoutingTraceEventsPage? page = await _client.SendOkAsync<RoutingTraceEventsPage>(
+                IpcMethods.GetRoutingTraceEvents,
+                new GetRoutingTraceEventsRequest { SessionId = sessionId, AfterSequence = _routingTraceAfterSequence, Limit = 200 },
+                _cts.Token);
+            if (page is null)
+            {
+                return;
+            }
+
+            if (!page.SessionFound)
+            {
+                await ReconcileRoutingTraceAsync(pollEvents: false);
+                return;
+            }
+
+            if (page.Events.Count > 0)
+            {
+                MergeRoutingTraceEvents(page.Events);
+                _routingTraceAfterSequence = page.LastSequenceId;
+            }
+        }
+        catch (Exception ex) when (IsBenignRoutingTraceError(ex))
+        {
+            await ReconcileRoutingTraceAsync(pollEvents: false);
+        }
+    }
+
+    private void MergeRoutingTraceEvents(IReadOnlyList<RoutingTraceEvent> events)
+    {
+        foreach (RoutingTraceEvent ev in events)
+        {
+            if (ev.FlowId != Guid.Empty && _routingTraceRowIndex.TryGetValue(ev.FlowId, out RoutingTraceEventRow? existing))
+            {
+                int idx = _routingTraceRows.IndexOf(existing);
+                var refreshed = new RoutingTraceEventRow(ev);
+                if (idx >= 0)
+                {
+                    _routingTraceRows[idx] = refreshed;
+                }
+                _routingTraceRowIndex[ev.FlowId] = refreshed;
+                continue;
+            }
+
+            var row = new RoutingTraceEventRow(ev);
+            _routingTraceRows.Add(row);
+            if (ev.FlowId != Guid.Empty)
+            {
+                _routingTraceRowIndex[ev.FlowId] = row;
+            }
+        }
+    }
+
+    private static bool IsBenignRoutingTraceError(Exception ex)
+    {
+        string message = ex.Message ?? string.Empty;
+        return message.Contains("routing_trace_unavailable", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("No routing trace session", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void OnRoutingTraceRowSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (RoutingTraceGrid.SelectedItem is RoutingTraceEventRow row)
+        {
+            RoutingTraceDetailsLine.Text = row.Details;
+        }
+    }
+
+    private async void OnCopyRoutingTraceReport(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string report = string.IsNullOrWhiteSpace(_routingTraceLastReport)
+                ? await FetchRoutingTraceReportAsync("text")
+                : _routingTraceLastReport;
+            System.Windows.Clipboard.SetText(report);
+        }
+        catch (Exception ex) when (!IsBenignRoutingTraceError(ex))
+        {
+            MessageBox.Show(this, ex.Message, AppBranding.ProductName, MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async void OnExportRoutingTraceJson(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string json = await FetchRoutingTraceReportAsync("json");
+            var dlg = new Microsoft.Win32.SaveFileDialog { Filter = "JSON|*.json", FileName = "routing-trace.json" };
+            if (dlg.ShowDialog() == true)
+            {
+                File.WriteAllText(dlg.FileName, json);
+            }
+        }
+        catch (Exception ex) when (!IsBenignRoutingTraceError(ex))
+        {
+            MessageBox.Show(this, ex.Message, AppBranding.ProductName, MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async Task<string> FetchRoutingTraceReportAsync(string format)
+    {
+        var payload = await _client.SendOkAsync<Dictionary<string, string>>(
+            IpcMethods.ExportRoutingTrace,
+            new { format },
+            _cts.Token);
+        return payload is not null && payload.TryGetValue("report", out string? report) ? report : string.Empty;
     }
 
     private static string? Prompt(string title, string placeholder)

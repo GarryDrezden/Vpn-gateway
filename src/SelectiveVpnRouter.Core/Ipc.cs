@@ -204,6 +204,13 @@ public static class IpcMethods
     public const string RemoveTempAppVpnRoute = "RemoveTempAppVpnRoute";
     public const string GetTempAppVpnStatus = "GetTempAppVpnStatus";
     public const string GetTempAppVpnFlows = "GetTempAppVpnFlows";
+    public const string StartRoutingTrace = "StartRoutingTrace";
+    public const string GetRoutingTraceStatus = "GetRoutingTraceStatus";
+    public const string GetRoutingTraceSnapshot = "GetRoutingTraceSnapshot";
+    public const string GetRoutingTraceEvents = "GetRoutingTraceEvents";
+    public const string StopRoutingTrace = "StopRoutingTrace";
+    public const string ClearRoutingTrace = "ClearRoutingTrace";
+    public const string ExportRoutingTrace = "ExportRoutingTrace";
 }
 
 public static class VpnConnectBudget

@@ -1,5 +1,15 @@
 # Changelog
 
+## Milestone — Routing Trace diagnostics (`routing-trace-pass-v1`)
+
+- **Routing Trace V1** in desktop app: single active session, last completed session, live grid, text/JSON export.
+- Process/app attribution (primary EXE, optional packaged helpers and child processes).
+- Passive TCP/UDP visibility (IPv4/IPv6), TCP/IPv4 VPN evidence from WFP + transparent proxy (no TLS MITM).
+- Trace-start baseline for pre-existing sockets; coverage reasons (historical, missing proxy evidence, unsupported protocol/family, etc.).
+- Logical flow correlation: stable OS process start, `proxy:{FlowId}` aliases, strong/weak tuple merge, bounded temporal weak merge.
+- Idempotent logical-flow updates: repeated identical polls do not inflate `UpdateCount`, `SequenceId`, or event-ring noise.
+- **V1 limits:** observability only — no UDP/QUIC selective routing, no IPv6 redirect, no DNS ETW; passive rows may lack remote detail.
+
 ## Milestone — Connection lifecycle stability (`vpn-lifecycle-stability-pass-v1`)
 
 - OpenVPN `IsConnected`: reject `Initialization Sequence Completed With Errors`; require successful completion line semantics.

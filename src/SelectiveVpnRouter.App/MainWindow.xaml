@@ -722,6 +722,36 @@
             </TabItem>
             <TabItem Header="Маршрутизация">
               <StackPanel Margin="0,4,0,8">
+                <TextBlock Text="МОНИТОР МАРШРУТИЗАЦИИ" Style="{StaticResource SectionTitleText}" Margin="0,0,0,6"/>
+                <DockPanel LastChildFill="True" Margin="0,0,0,4">
+                  <Button x:Name="RoutingTraceBrowseBtn" DockPanel.Dock="Right" Content="Обзор" Click="OnBrowseRoutingTraceTarget" Style="{StaticResource SecondaryButton}" MinWidth="72" Margin="8,0,0,0" Padding="10,4"/>
+                  <ComboBox x:Name="RoutingTraceRuleCombo" DisplayMemberPath="Name" SelectionChanged="OnRoutingTraceRuleSelected" Margin="0,0,0,0"/>
+                </DockPanel>
+                <TextBox x:Name="RoutingTraceTargetBox" IsReadOnly="True" Margin="0,0,0,6" ToolTip="Приложение / EXE для мониторинга"/>
+                <WrapPanel Margin="0,0,0,6">
+                  <CheckBox x:Name="RoutingTraceFollowChildren" Content="Дочерние процессы" IsChecked="True" Margin="0,0,12,0"/>
+                  <CheckBox x:Name="RoutingTraceIncludeUdpIpv6" Content="UDP и IPv6" IsChecked="True"/>
+                </WrapPanel>
+                <WrapPanel Margin="0,0,0,6">
+                  <Button x:Name="RoutingTraceStartBtn" Content="Начать мониторинг" Click="OnStartRoutingTrace" Style="{StaticResource SecondaryButton}" Margin="0,0,6,0" Padding="10,4"/>
+                  <Button x:Name="RoutingTraceStopBtn" Content="Остановить и сформировать отчёт" Click="OnStopRoutingTrace" Style="{StaticResource SecondaryButton}" IsEnabled="False" Margin="0,0,6,0" Padding="10,4"/>
+                  <Button x:Name="RoutingTraceCopyBtn" Content="Копировать отчёт" Click="OnCopyRoutingTraceReport" Style="{StaticResource GhostButton}" Margin="0,0,6,0" Padding="10,4" IsEnabled="False"/>
+                  <Button x:Name="RoutingTraceExportBtn" Content="Экспорт JSON" Click="OnExportRoutingTraceJson" Style="{StaticResource GhostButton}" Padding="10,4" IsEnabled="False"/>
+                </WrapPanel>
+                <TextBlock x:Name="RoutingTraceStatusLine" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,4" Text="Мониторинг не запущен"/>
+                <TextBlock x:Name="RoutingTraceCountersLine" TextWrapping="Wrap" Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,6" Text=""/>
+                <DataGrid x:Name="RoutingTraceGrid" Height="160" CanUserAddRows="False" CanUserDeleteRows="False" SelectionChanged="OnRoutingTraceRowSelected" Margin="0,0,0,4">
+                  <DataGrid.Columns>
+                    <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="64"/>
+                    <DataGridTextColumn Header="Process" Binding="{Binding Process}" Width="100"/>
+                    <DataGridTextColumn Header="Proto" Binding="{Binding Proto}" Width="52"/>
+                    <DataGridTextColumn Header="Destination" Binding="{Binding Destination}" Width="160"/>
+                    <DataGridTextColumn Header="Expected" Binding="{Binding Expected}" Width="72"/>
+                    <DataGridTextColumn Header="Observed" Binding="{Binding Observed}" Width="88"/>
+                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="52"/>
+                  </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock x:Name="RoutingTraceDetailsLine" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" Margin="0,0,0,12" Text=""/>
                 <TextBlock Text="Проверка реального приложения" Style="{StaticResource SectionTitleText}" Margin="0,0,0,6"/>
                 <DockPanel LastChildFill="True" Margin="0,0,0,6">
                   <Button DockPanel.Dock="Right" Content="Обзор EXE" Click="OnBrowseRealApp" Style="{StaticResource SecondaryButton}" MinWidth="100" Margin="8,0,0,0" Padding="10,4"/>
