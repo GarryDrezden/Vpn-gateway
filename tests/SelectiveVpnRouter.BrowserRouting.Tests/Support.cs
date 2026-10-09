@@ -94,6 +94,15 @@ internal static class Ipc
                 client = new { extensionVersion, nativeHostVersion },
             },
         });
+
+    public static byte[] UpsertRule(long expectedRevision, object rule, string id = "w-upsert") =>
+        Request(new { version = 1, id, method = "upsertRule", @params = new { expectedRevision, rule } });
+
+    public static byte[] DeleteRule(long expectedRevision, string ruleId, string id = "w-delete") =>
+        Request(new { version = 1, id, method = "deleteRule", @params = new { expectedRevision, id = ruleId } });
+
+    public static byte[] ResetRules(long expectedRevision, string id = "w-reset") =>
+        Request(new { version = 1, id, method = "resetRules", @params = new { expectedRevision } });
 }
 
 internal sealed class TestServiceVersion(string value) : IBrowserIntegrationServiceVersion
@@ -151,7 +160,8 @@ internal static class DispatcherTestFactory
         FakeVpnTunnelReadiness? tunnel = null,
         BrowserClientTracker? tracker = null,
         string serviceVersion = "1.2.3.4",
-        FakeInterfaceNameLookup? names = null)
+        FakeInterfaceNameLookup? names = null,
+        BrowserRoutingStateStore? writeStore = null)
     {
         tunnel ??= new FakeVpnTunnelReadiness();
         tracker ??= new BrowserClientTracker(new FakeTimeProvider(DateTimeOffset.UtcNow));
@@ -159,6 +169,7 @@ internal static class DispatcherTestFactory
         proxyReadiness ??= new StubProxyReadiness(proxy ?? BrowserProxyStatus.NotAvailable);
         return new BrowserRoutingIpcDispatcher(
             snapshotProvider,
+            writeStore,
             proxyReadiness,
             tunnel,
             tracker,

@@ -4,7 +4,9 @@
 
 **Browser Integration Port v1 — Slice 8 ACCEPTED:** Integration API v1 manifest, explicit loopback SOCKS5 browser proxy, VPN egress readiness, client heartbeat/stale semantics, VPN-bound DNS (OpenVPN PUSH), fail-closed browser routing, MV3 alarm-driven endpoint recovery in `ext-vpn-route`, real Yandex acceptance. Release baseline **807/807 PASS**.
 
-**Slice 9A (in progress, not deployed):** Service-side write methods `upsertRule`, `deleteRule`, `resetRules` with optimistic `expectedRevision` on this pipe. Native Host and extension remain read-only until Slice 9B.
+**Slice 9A — DONE (committed, not deployed):** Service-side write methods `upsertRule`, `deleteRule`, `resetRules` with optimistic `expectedRevision` on this pipe. Capability `browserRoutingWrite` in Integration API manifest.
+
+**Slice 9B — NEXT:** Native Host bridge and extension write client (`ext-vpn-route`); no rule-editor UI until Slice 9C.
 
 **Runtime manifest (read):** `getManifest` publishes `integrationApiVersion` (`1`), `serviceVersion`, sorted `capabilities`, runtime `browserProxy`, `vpnEgress`, and `browserClient`. Contract fixture: `tests/contracts/browser-routing-v1/integration-manifest-v1.example.json`.
 
@@ -74,7 +76,17 @@ The store writes:
 
 Writes are atomic: temp file, flush to disk, then `File.Replace` with a backup.
 
-Nothing in the Service ever turns a broken state into an empty Direct state. Only an explicit `Reset()` does that, and it creates a new generation that the extension shows as a lineage change. There is no UI or IPC method for `Update` or `Reset` yet.
+Nothing in the Service ever turns a broken state into an empty Direct state. Only an explicit store `Reset()` (new generation) does that for corruption recovery.
+
+### Write API (Slice 9A — Service only, not deployed)
+
+| Method | Params | Success result | Errors |
+| --- | --- | --- | --- |
+| `upsertRule` | `expectedRevision`, `rule` | `stateGeneration`, `revision`, `defaultRoute`, `ruleCount` | `revision_conflict` (+ `currentRevision`), `validation_failed`, `persistence_failed`, `browser_state_unavailable` |
+| `deleteRule` | `expectedRevision`, `id` | same metadata | `not_found`, `revision_conflict`, … |
+| `resetRules` | `expectedRevision` | clears rules, `defaultRoute: Direct`, revision +1 unless already empty (idempotent) | `revision_conflict`, … |
+
+`expectedRevision` must match the current revision or the Service performs **no** mutation. Normal writes keep `stateGeneration` unchanged and bump `revision` by one after atomic persist (`browser-routing-state.json` temp + replace). Capability: `browserRoutingWrite`.
 
 ## Pipe security
 
@@ -86,7 +98,7 @@ The browser state is readable by local interactive users only. It is not writabl
 | DACL | protected (no inheritance); SYSTEM, Administrators, creator: FullControl; Interactive: ReadWrite; Network: Deny |
 | not granted | Everyone, Authenticated Users, Users |
 | transport | named pipe only; no TCP, no network port |
-| methods | `getManifest`, `getPage`, read-only allowlist; anything else is `unknown_method` |
+| methods | `getManifest`, `getPage` (read); **Slice 9A:** `upsertRule`, `deleteRule`, `resetRules` (write, `expectedRevision`) |
 | limits | request ≤ 4 KiB; response ≤ 512 KiB; 5 s per client |
 | errors | bare `{code}`; no exception text, paths or rule data |
 | logs | method plus outcome only (`browser-routing getManifest: ok`) |

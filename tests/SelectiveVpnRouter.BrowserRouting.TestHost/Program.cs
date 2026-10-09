@@ -41,6 +41,7 @@ IBrowserProxyReadiness readiness = options.ProxyPort is int port
     : new UnavailableBrowserProxyReadiness();
 var dispatcher = new BrowserRoutingIpcDispatcher(
     () => store.Current,
+    store,
     readiness,
     new UnavailableTunnelEgress(),
     new BrowserClientTracker(),

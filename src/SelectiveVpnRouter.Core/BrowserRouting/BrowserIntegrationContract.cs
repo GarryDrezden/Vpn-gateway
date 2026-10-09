@@ -11,6 +11,7 @@ public static class BrowserIntegrationContract
         "browserClientHeartbeat",
         "browserExplicitSocks",
         "browserRoutingState",
+        "browserRoutingWrite",
         "vpnEgressReadiness",
     ];
 

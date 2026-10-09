@@ -235,7 +235,7 @@ public static class BrowserRoutingValidator
         return issues.Count == structural && parsedAll ? rules : null;
     }
 
-    private static BrowserRoutingRule? TryParseRule(JsonElement element, string path, List<BrowserRoutingIssue> issues)
+    public static BrowserRoutingRule? TryParseRule(JsonElement element, string path, List<BrowserRoutingIssue> issues)
     {
         if (element.ValueKind != JsonValueKind.Object)
         {

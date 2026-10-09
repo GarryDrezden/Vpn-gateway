@@ -33,12 +33,16 @@ public class SourceSecurityTests
     }
 
     [Fact]
-    public void Dispatcher_allowlist_has_exactly_two_read_only_methods()
+    public void Dispatcher_allowlist_includes_read_and_write_methods()
     {
         var methods = typeof(BrowserRoutingIpcProtocol.Methods).GetFields().Select(f => (string)f.GetValue(null)!).ToArray();
-        Assert.Equal(["getManifest", "getPage"], methods.Order(StringComparer.Ordinal));
-        var dispatcher = File.ReadAllText(Path.Combine(CoreDir, "BrowserRoutingIpcProtocol.cs"));
-        Assert.Equal(2, Regex.Matches(dispatcher, @"BrowserRoutingIpcProtocol\.Methods\.\w+ =>").Count);
+        Assert.Equal(
+            ["deleteRule", "getManifest", "getPage", "resetRules", "upsertRule"],
+            methods.Order(StringComparer.Ordinal));
+        var sources = Directory.GetFiles(CoreDir, "BrowserRoutingIpcProtocol*.cs")
+            .Select(f => File.ReadAllText(f))
+            .Aggregate((a, b) => a + b);
+        Assert.Equal(5, Regex.Matches(sources, @"BrowserRoutingIpcProtocol\.Methods\.\w+ =>").Count);
     }
 
     [Fact]

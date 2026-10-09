@@ -130,6 +130,71 @@ public sealed class BrowserRoutingStateStore
         }
     }
 
+    /// <summary>Upserts one rule by id in the current generation; bumps revision on success.</summary>
+    public BrowserRoutingSnapshot UpsertRule(long expectedRevision, BrowserRoutingRule rule)
+    {
+        lock (_writeLock)
+        {
+            var current = _current ?? throw new BrowserRoutingUnavailableException(_unavailableReason);
+            if (current.Revision != expectedRevision)
+                throw new BrowserRoutingConcurrencyException(current.Revision);
+            if (current.Revision >= BrowserRoutingContract.MaxRevision)
+                throw new BrowserRoutingValidationException([new(BrowserRoutingValidator.Codes.InvalidRevision, "/revision")]);
+            var rules = current.State.Rules.ToList();
+            var index = rules.FindIndex(r => string.Equals(r.Id, rule.Id, StringComparison.Ordinal));
+            if (index >= 0)
+                rules[index] = rule;
+            else
+                rules.Add(rule);
+            var next = BrowserRoutingSnapshot.Create(new BrowserRoutingState(
+                current.StateGeneration, current.Revision + 1, current.State.DefaultRoute, rules));
+            if (!Commit(next))
+                throw new BrowserRoutingPersistenceException();
+            return next;
+        }
+    }
+
+    /// <summary>Removes a rule by id; <see cref="BrowserRoutingRuleNotFoundException"/> when missing.</summary>
+    public BrowserRoutingSnapshot DeleteRule(long expectedRevision, string id)
+    {
+        lock (_writeLock)
+        {
+            var current = _current ?? throw new BrowserRoutingUnavailableException(_unavailableReason);
+            if (current.Revision != expectedRevision)
+                throw new BrowserRoutingConcurrencyException(current.Revision);
+            var rules = current.State.Rules.ToList();
+            var index = rules.FindIndex(r => string.Equals(r.Id, id, StringComparison.Ordinal));
+            if (index < 0)
+                throw new BrowserRoutingRuleNotFoundException(id);
+            rules.RemoveAt(index);
+            var next = BrowserRoutingSnapshot.Create(new BrowserRoutingState(
+                current.StateGeneration, current.Revision + 1, current.State.DefaultRoute, rules));
+            if (!Commit(next))
+                throw new BrowserRoutingPersistenceException();
+            return next;
+        }
+    }
+
+    /// <summary>Clears all rules and sets defaultRoute Direct in the same generation (revision bump unless already empty).</summary>
+    public BrowserRoutingSnapshot ResetRules(long expectedRevision)
+    {
+        lock (_writeLock)
+        {
+            var current = _current ?? throw new BrowserRoutingUnavailableException(_unavailableReason);
+            if (current.Revision != expectedRevision)
+                throw new BrowserRoutingConcurrencyException(current.Revision);
+            if (current.State.DefaultRoute == BrowserRoutingContract.RouteDirect && current.RuleCount == 0)
+                return current;
+            if (current.Revision >= BrowserRoutingContract.MaxRevision)
+                throw new BrowserRoutingValidationException([new(BrowserRoutingValidator.Codes.InvalidRevision, "/revision")]);
+            var next = BrowserRoutingSnapshot.Create(new BrowserRoutingState(
+                current.StateGeneration, current.Revision + 1, BrowserRoutingContract.RouteDirect, []));
+            if (!Commit(next))
+                throw new BrowserRoutingPersistenceException();
+            return next;
+        }
+    }
+
     /// <summary>
     /// Explicit destructive reset: a new generation, revision 0, Direct, no rules.
     /// The only way to recover from a corrupt file; the old file stays as the backup.
@@ -279,3 +344,9 @@ public sealed class BrowserRoutingConcurrencyException(long currentRevision)
 
 public sealed class BrowserRoutingPersistenceException()
     : Exception("Browser routing state could not be persisted; the previous state is kept.");
+
+public sealed class BrowserRoutingRuleNotFoundException(string ruleId)
+    : Exception("Browser routing rule was not found.")
+{
+    public string RuleId { get; } = ruleId;
+}

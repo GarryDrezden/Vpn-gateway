@@ -28,6 +28,7 @@ public sealed class BrowserRoutingPipeHost(
 
         var dispatcher = new BrowserRoutingIpcDispatcher(
             () => store.Current,
+            store,
             proxyReadiness,
             vpnTunnelEgressReadiness,
             browserClientTracker,

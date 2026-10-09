@@ -15,6 +15,7 @@ public class IntegrationManifestV1ContractTests
         "browserExplicitSocks",
         "vpnEgressReadiness",
         "browserClientHeartbeat",
+        "browserRoutingWrite",
     ];
 
     [Fact]

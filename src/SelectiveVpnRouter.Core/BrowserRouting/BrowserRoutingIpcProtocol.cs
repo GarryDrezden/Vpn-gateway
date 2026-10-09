@@ -37,6 +37,9 @@ public static class BrowserRoutingIpcProtocol
     {
         public const string GetManifest = "getManifest";
         public const string GetPage = "getPage";
+        public const string UpsertRule = "upsertRule";
+        public const string DeleteRule = "deleteRule";
+        public const string ResetRules = "resetRules";
     }
 
     public static class Errors
@@ -48,12 +51,17 @@ public static class BrowserRoutingIpcProtocol
         public const string SnapshotChanged = "snapshot_changed";
         public const string InvalidCursor = "invalid_cursor";
         public const string InternalError = "internal_error";
+        public const string RevisionConflict = "revision_conflict";
+        public const string ValidationFailed = "validation_failed";
+        public const string NotFound = "not_found";
+        public const string PersistenceFailed = "persistence_failed";
     }
 }
 
 /// <summary>Handles one request frame and produces one response frame. Pure: no I/O, no logging of state data.</summary>
-public sealed class BrowserRoutingIpcDispatcher(
+public sealed partial class BrowserRoutingIpcDispatcher(
     Func<BrowserRoutingSnapshot?> currentSnapshot,
+    BrowserRoutingStateStore? mutationStore,
     IBrowserProxyReadiness proxyReadiness,
     IVpnTunnelEgressReadiness vpnTunnelEgressReadiness,
     BrowserClientTracker browserClientTracker,
@@ -108,6 +116,9 @@ public sealed class BrowserRoutingIpcDispatcher(
                 {
                     BrowserRoutingIpcProtocol.Methods.GetManifest => HandleGetManifest(id, root),
                     BrowserRoutingIpcProtocol.Methods.GetPage => Page(id, root),
+                    BrowserRoutingIpcProtocol.Methods.UpsertRule => UpsertRule(id, root),
+                    BrowserRoutingIpcProtocol.Methods.DeleteRule => DeleteRule(id, root),
+                    BrowserRoutingIpcProtocol.Methods.ResetRules => ResetRules(id, root),
                     _ => Fail(id, "unknown", BrowserRoutingIpcProtocol.Errors.UnknownMethod)
                 };
             }
@@ -331,7 +342,7 @@ public sealed class BrowserRoutingIpcDispatcher(
         writer.WriteEndObject();
     });
 
-    private static Outcome Fail(string? id, string method, string code, string? detail = null)
+    private static Outcome Fail(string? id, string method, string code, string? detail = null, Action<Utf8JsonWriter>? writeError = null)
     {
         var response = Write(writer =>
         {
@@ -343,6 +354,7 @@ public sealed class BrowserRoutingIpcDispatcher(
             writer.WriteBoolean("ok", false);
             writer.WriteStartObject("error");
             writer.WriteString("code", code);
+            writeError?.Invoke(writer);
             writer.WriteEndObject();
         });
         return new Outcome(response, method, detail is null ? code : code + " (" + detail + ")");

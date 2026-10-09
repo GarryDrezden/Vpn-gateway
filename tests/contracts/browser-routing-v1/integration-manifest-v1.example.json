@@ -6,6 +6,7 @@
     "browserClientHeartbeat",
     "browserExplicitSocks",
     "browserRoutingState",
+    "browserRoutingWrite",
     "vpnEgressReadiness"
   ],
   "stateGeneration": "75f5c435-6ac5-45a5-876b-042a6376635e",
