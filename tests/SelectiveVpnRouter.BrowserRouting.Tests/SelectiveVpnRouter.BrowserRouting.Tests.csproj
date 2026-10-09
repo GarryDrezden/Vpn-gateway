@@ -14,5 +14,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SelectiveVpnRouter.Core\SelectiveVpnRouter.Core.csproj" />
+    <ProjectReference Include="..\..\src\SelectiveVpnRouter.Network\SelectiveVpnRouter.Network.csproj" />
+    <ProjectReference Include="..\..\src\SelectiveVpnRouter.Service\SelectiveVpnRouter.Service.csproj" />
+    <ProjectReference Include="..\..\tools\BrowserRoutingAcceptanceSeed\BrowserRoutingAcceptanceSeed.csproj" />
   </ItemGroup>
 </Project>

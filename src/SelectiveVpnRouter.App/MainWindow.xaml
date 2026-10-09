@@ -109,6 +109,47 @@
                   </StackPanel>
                 </StackPanel>
               </Border>
+
+              <Border Style="{StaticResource CardBorder}" Margin="0,16,0,0">
+                <StackPanel>
+                  <TextBlock Text="Браузерная маршрутизация" Style="{StaticResource SectionTitleText}" Margin="0,0,0,12"/>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="170"/>
+                      <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                      <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Браузерное расширение" Style="{StaticResource SecondaryText}"/>
+                    <TextBlock x:Name="HomeBrowserExtensionText" Grid.Row="0" Grid.Column="1" Text="—" TextWrapping="Wrap"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Browser API" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeBrowserApiText" Grid.Row="1" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Browser Proxy" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeBrowserProxyText" Grid.Row="2" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="SOCKS" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeBrowserSocksText" Grid.Row="3" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="VPN egress" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeBrowserVpnEgressText" Grid.Row="4" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="VPN интерфейс" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeBrowserVpnInterfaceText" Grid.Row="5" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Правил" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeBrowserRuleCountText" Grid.Row="6" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Последний контакт" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeBrowserLastContactText" Grid.Row="7" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                    <TextBlock x:Name="HomeBrowserDetailText" Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2"
+                               Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,10,0,0" Visibility="Collapsed"/>
+                  </Grid>
+                </StackPanel>
+              </Border>
             </StackPanel>
 
             <Border Grid.Column="2" Style="{StaticResource CardBorder}">

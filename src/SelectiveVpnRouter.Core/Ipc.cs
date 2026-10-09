@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using SelectiveVpnRouter.Core.BrowserRouting;
 
 namespace SelectiveVpnRouter.Core;
 
@@ -48,6 +49,7 @@ public sealed record ServiceSnapshot
     public WfpPolicyDiagnostics WfpPolicy { get; init; } = WfpPolicyDiagnostics.Empty;
     public string Ipv6PolicyNote { get; init; } = "";
     public string UdpNote { get; init; } = "UDP/QUIC per-process routing is unsupported in this MVP (TCP only).";
+    public BrowserIntegrationSnapshot? BrowserIntegration { get; init; }
 }
 
 public sealed record OpenVpnLiveStatus

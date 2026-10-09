@@ -82,4 +82,101 @@ internal static class Ipc
         var root = Parse(response);
         return root.GetProperty("ok").GetBoolean() ? null : root.GetProperty("error").GetProperty("code").GetString();
     }
+
+    public static byte[] ManifestHeartbeat(string extensionVersion, string nativeHostVersion, string id = "req-hb") =>
+        Request(new
+        {
+            version = 1,
+            id,
+            method = "getManifest",
+            @params = new
+            {
+                client = new { extensionVersion, nativeHostVersion },
+            },
+        });
+}
+
+internal sealed class TestServiceVersion(string value) : IBrowserIntegrationServiceVersion
+{
+    public string ServiceVersion { get; } = value;
+}
+
+internal sealed class FakeVpnTunnelReadiness : IVpnTunnelEgressReadiness
+{
+    private bool _ready;
+    private int _ifIndex;
+
+    public void SetReady(int ifIndex)
+    {
+        _ready = true;
+        _ifIndex = ifIndex;
+    }
+
+    public void SetUnavailable()
+    {
+        _ready = false;
+        _ifIndex = 0;
+    }
+
+    public bool TryGetTunnelInterfaceIndex(out int interfaceIndex)
+    {
+        interfaceIndex = _ifIndex;
+        return _ready;
+    }
+}
+
+internal sealed class FakeInterfaceNameLookup : IVpnInterfaceNameLookup
+{
+    public string? Name { get; set; }
+
+    public string? TryGetInterfaceName(int interfaceIndex) => Name;
+}
+
+internal static class DispatcherTestFactory
+{
+    public static BrowserRoutingIpcDispatcher Create(
+        BrowserRoutingSnapshot? snapshot,
+        BrowserProxyStatus? proxy = null,
+        IBrowserProxyReadiness? proxyReadiness = null,
+        FakeVpnTunnelReadiness? tunnel = null,
+        BrowserClientTracker? tracker = null,
+        string serviceVersion = "1.2.3.4",
+        FakeInterfaceNameLookup? names = null) =>
+        Create(() => snapshot, proxy, proxyReadiness, tunnel, tracker, serviceVersion, names);
+
+    public static BrowserRoutingIpcDispatcher Create(
+        Func<BrowserRoutingSnapshot?> snapshotProvider,
+        BrowserProxyStatus? proxy = null,
+        IBrowserProxyReadiness? proxyReadiness = null,
+        FakeVpnTunnelReadiness? tunnel = null,
+        BrowserClientTracker? tracker = null,
+        string serviceVersion = "1.2.3.4",
+        FakeInterfaceNameLookup? names = null)
+    {
+        tunnel ??= new FakeVpnTunnelReadiness();
+        tracker ??= new BrowserClientTracker(new FakeTimeProvider(DateTimeOffset.UtcNow));
+        names ??= new FakeInterfaceNameLookup();
+        proxyReadiness ??= new StubProxyReadiness(proxy ?? BrowserProxyStatus.NotAvailable);
+        return new BrowserRoutingIpcDispatcher(
+            snapshotProvider,
+            proxyReadiness,
+            tunnel,
+            tracker,
+            new TestServiceVersion(serviceVersion),
+            names);
+    }
+
+    private sealed class StubProxyReadiness(BrowserProxyStatus status) : IBrowserProxyReadiness
+    {
+        public BrowserProxyStatus GetStatus() => status;
+    }
+}
+
+internal sealed class FakeTimeProvider(DateTimeOffset utcNow) : TimeProvider
+{
+    private DateTimeOffset _utcNow = utcNow;
+
+    public void SetUtcNow(DateTimeOffset value) => _utcNow = value;
+
+    public override DateTimeOffset GetUtcNow() => _utcNow;
 }

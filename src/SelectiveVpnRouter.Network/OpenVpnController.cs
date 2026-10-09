@@ -22,6 +22,7 @@ public sealed class OpenVpnStatus
 
 public sealed class OpenVpnController : IAsyncDisposable
 {
+    private readonly VpnSessionDnsStore? _sessionDns;
     private readonly ConcurrentQueue<string> _log = new();
     private Process? _process;
     private ProcessJob? _job;
@@ -36,6 +37,11 @@ public sealed class OpenVpnController : IAsyncDisposable
     public string? IfconfigPeerOrMask { get; private set; }
     public string? DiagnosticCommandLine { get; private set; }
     public IReadOnlyList<string> LogSnapshot => _log.ToArray();
+
+    public OpenVpnController(VpnSessionDnsStore? sessionDns = null)
+    {
+        _sessionDns = sessionDns;
+    }
 
     public static OpenVpnVersionResult ReadVersion(string exe)
         => ReadVersionAsync(exe).GetAwaiter().GetResult();
@@ -215,6 +221,8 @@ public sealed class OpenVpnController : IAsyncDisposable
         while (_log.Count > 400 && _log.TryDequeue(out _))
         {
         }
+
+        _sessionDns?.ApplyFromOpenVpnLogLine(line);
 
         string? gw = OpenVpnStateParser.TryParseRouteGateway(line);
         if (gw is not null)

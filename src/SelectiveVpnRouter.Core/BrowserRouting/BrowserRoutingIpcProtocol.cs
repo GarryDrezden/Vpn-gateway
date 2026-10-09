@@ -52,10 +52,19 @@ public static class BrowserRoutingIpcProtocol
 }
 
 /// <summary>Handles one request frame and produces one response frame. Pure: no I/O, no logging of state data.</summary>
-public sealed class BrowserRoutingIpcDispatcher(Func<BrowserRoutingSnapshot?> currentSnapshot, IBrowserProxyReadiness proxyReadiness)
+public sealed class BrowserRoutingIpcDispatcher(
+    Func<BrowserRoutingSnapshot?> currentSnapshot,
+    IBrowserProxyReadiness proxyReadiness,
+    IVpnTunnelEgressReadiness vpnTunnelEgressReadiness,
+    BrowserClientTracker browserClientTracker,
+    IBrowserIntegrationServiceVersion serviceVersion,
+    IVpnInterfaceNameLookup interfaceNameLookup)
 {
-    private static readonly JsonDocumentOptions RequestOptions = new() { MaxDepth = 4 };
+    private static readonly JsonDocumentOptions RequestOptions = new() { MaxDepth = 5 };
     private static readonly HashSet<string> ManifestFields = new(["version", "id", "method"], StringComparer.Ordinal);
+    private static readonly HashSet<string> ManifestWithParamsFields = new(["version", "id", "method", "params"], StringComparer.Ordinal);
+    private static readonly HashSet<string> ManifestParamsFields = new(["client"], StringComparer.Ordinal);
+    private static readonly HashSet<string> ManifestClientFields = new(["extensionVersion", "nativeHostVersion"], StringComparer.Ordinal);
     private static readonly HashSet<string> PageFields = new(["version", "id", "method", "params"], StringComparer.Ordinal);
     private static readonly HashSet<string> PageParams = new(["stateGeneration", "revision", "startIndex"], StringComparer.Ordinal);
 
@@ -97,9 +106,7 @@ public sealed class BrowserRoutingIpcDispatcher(Func<BrowserRoutingSnapshot?> cu
                 // Explicit allowlist: the browser endpoint has no other method and no generic relay.
                 return method.GetString() switch
                 {
-                    BrowserRoutingIpcProtocol.Methods.GetManifest => UniqueFields(root, ManifestFields)
-                        ? Manifest(id)
-                        : Fail(id, BrowserRoutingIpcProtocol.Methods.GetManifest, BrowserRoutingIpcProtocol.Errors.InvalidRequest),
+                    BrowserRoutingIpcProtocol.Methods.GetManifest => HandleGetManifest(id, root),
                     BrowserRoutingIpcProtocol.Methods.GetPage => Page(id, root),
                     _ => Fail(id, "unknown", BrowserRoutingIpcProtocol.Errors.UnknownMethod)
                 };
@@ -111,13 +118,40 @@ public sealed class BrowserRoutingIpcDispatcher(Func<BrowserRoutingSnapshot?> cu
         }
     }
 
+    private Outcome HandleGetManifest(string id, JsonElement root)
+    {
+        const string method = BrowserRoutingIpcProtocol.Methods.GetManifest;
+        if (root.TryGetProperty("params", out JsonElement paramsElement))
+        {
+            if (!UniqueFields(root, ManifestWithParamsFields, exact: true))
+                return Fail(id, method, BrowserRoutingIpcProtocol.Errors.InvalidRequest);
+            if (paramsElement.ValueKind != JsonValueKind.Object || !UniqueFields(paramsElement, ManifestParamsFields, exact: true))
+                return Fail(id, method, BrowserRoutingIpcProtocol.Errors.InvalidRequest);
+            if (!paramsElement.TryGetProperty("client", out JsonElement client) ||
+                client.ValueKind != JsonValueKind.Object ||
+                !UniqueFields(client, ManifestClientFields, exact: true))
+                return Fail(id, method, BrowserRoutingIpcProtocol.Errors.InvalidRequest);
+            if (!TryReadClientVersion(client.GetProperty("extensionVersion"), out string? extensionVersion) ||
+                !TryReadClientVersion(client.GetProperty("nativeHostVersion"), out string? nativeHostVersion))
+                return Fail(id, method, BrowserRoutingIpcProtocol.Errors.InvalidRequest);
+
+            browserClientTracker.Touch(extensionVersion!, nativeHostVersion!);
+            return Manifest(id);
+        }
+
+        return UniqueFields(root, ManifestFields, exact: true)
+            ? Manifest(id)
+            : Fail(id, method, BrowserRoutingIpcProtocol.Errors.InvalidRequest);
+    }
+
     private Outcome Manifest(string id)
     {
         const string method = BrowserRoutingIpcProtocol.Methods.GetManifest;
         var snapshot = currentSnapshot();
         if (snapshot is null)
             return Fail(id, method, BrowserRoutingIpcProtocol.Errors.BrowserStateUnavailable);
-        var proxy = proxyReadiness.GetStatus();
+        BrowserProxyStatus proxy = proxyReadiness.GetStatus();
+        BrowserClientSnapshot client = browserClientTracker.GetSnapshot();
 
         var response = Success(id, writer =>
         {
@@ -127,23 +161,88 @@ public sealed class BrowserRoutingIpcDispatcher(Func<BrowserRoutingSnapshot?> cu
             writer.WriteString("defaultRoute", snapshot.State.DefaultRoute);
             writer.WriteNumber("ruleCount", snapshot.RuleCount);
             writer.WriteNumber("pageBudgetBytes", BrowserRoutingIpcProtocol.PageRulesBudgetBytes);
-            writer.WriteStartObject("browserProxy");
-            if (proxy.Status == BrowserProxyStatus.Ready && IsLoopback(proxy.EndpointHost) && proxy.EndpointPort is >= 1 and <= 65535)
-            {
-                writer.WriteString("status", BrowserProxyStatus.Ready);
-                writer.WriteStartObject("endpoint");
-                writer.WriteString("host", proxy.EndpointHost);
-                writer.WriteNumber("port", proxy.EndpointPort.Value);
-                writer.WriteEndObject();
-            }
-            else
-            {
-                writer.WriteString("status", BrowserProxyStatus.Unavailable);
-                writer.WriteNull("endpoint");
-            }
-            writer.WriteEndObject();
+            writer.WriteNumber("integrationApiVersion", BrowserIntegrationContract.IntegrationApiVersion);
+            writer.WriteString("serviceVersion", serviceVersion.ServiceVersion);
+            writer.WriteStartArray("capabilities");
+            foreach (string capability in BrowserIntegrationContract.Capabilities)
+                writer.WriteStringValue(capability);
+            writer.WriteEndArray();
+            WriteBrowserProxy(writer, proxy);
+            WriteVpnEgress(writer);
+            WriteBrowserClient(writer, client);
         });
         return new Outcome(response, method, "ok");
+    }
+
+    private void WriteBrowserProxy(Utf8JsonWriter writer, BrowserProxyStatus proxy)
+    {
+        writer.WriteStartObject("browserProxy");
+        if (proxy.Status == BrowserProxyStatus.Ready && IsLoopback(proxy.EndpointHost) && proxy.EndpointPort is >= 1 and <= 65535)
+        {
+            writer.WriteString("status", BrowserProxyStatus.Ready);
+            writer.WriteStartObject("endpoint");
+            writer.WriteString("host", proxy.EndpointHost);
+            writer.WriteNumber("port", proxy.EndpointPort.Value);
+            writer.WriteEndObject();
+        }
+        else
+        {
+            writer.WriteString("status", BrowserProxyStatus.Unavailable);
+            writer.WriteNull("endpoint");
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private void WriteVpnEgress(Utf8JsonWriter writer)
+    {
+        writer.WriteStartObject("vpnEgress");
+        if (vpnTunnelEgressReadiness.TryGetTunnelInterfaceIndex(out int interfaceIndex))
+        {
+            writer.WriteString("status", BrowserIntegrationContract.VpnEgressStatus.Ready);
+            writer.WriteNumber("interfaceIndex", interfaceIndex);
+            string? name = interfaceNameLookup.TryGetInterfaceName(interfaceIndex);
+            if (name is null)
+                writer.WriteNull("interfaceName");
+            else
+                writer.WriteString("interfaceName", name);
+        }
+        else
+        {
+            writer.WriteString("status", BrowserIntegrationContract.VpnEgressStatus.Unavailable);
+            writer.WriteNull("interfaceIndex");
+            writer.WriteNull("interfaceName");
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static void WriteBrowserClient(Utf8JsonWriter writer, BrowserClientSnapshot client)
+    {
+        writer.WriteStartObject("browserClient");
+        writer.WriteString("status", client.Status);
+        if (client.LastSeenUtc is null)
+            writer.WriteNull("lastSeenUtc");
+        else
+            writer.WriteString("lastSeenUtc", client.LastSeenUtc.Value.ToString("O", CultureInfo.InvariantCulture));
+        writer.WriteEndObject();
+    }
+
+    private static bool TryReadClientVersion(JsonElement element, out string? value)
+    {
+        value = null;
+        if (element.ValueKind != JsonValueKind.String)
+            return false;
+        value = element.GetString();
+        if (string.IsNullOrEmpty(value) || value.Length > BrowserIntegrationContract.ClientVersionMaxLength)
+            return false;
+        foreach (char c in value)
+        {
+            if (c < 32 || c > 126)
+                return false;
+        }
+
+        return true;
     }
 
     private Outcome Page(string id, JsonElement root)

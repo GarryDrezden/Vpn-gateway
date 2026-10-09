@@ -39,7 +39,13 @@ void Bump()
 IBrowserProxyReadiness readiness = options.ProxyPort is int port
     ? new FixedReadiness(new BrowserProxyStatus(BrowserProxyStatus.Ready, "127.0.0.1", port))
     : new UnavailableBrowserProxyReadiness();
-var dispatcher = new BrowserRoutingIpcDispatcher(() => store.Current, readiness);
+var dispatcher = new BrowserRoutingIpcDispatcher(
+    () => store.Current,
+    readiness,
+    new UnavailableTunnelEgress(),
+    new BrowserClientTracker(),
+    new TestServiceVersion(),
+    new TestInterfaceLookup());
 var server = new BrowserRoutingPipeServer(options.Pipe, dispatcher, line =>
 {
     Console.Error.WriteLine(line);
@@ -166,4 +172,23 @@ static (string Pipe, string Store, int Rules, bool Worst, string DefaultRoute, i
 internal sealed class FixedReadiness(BrowserProxyStatus status) : IBrowserProxyReadiness
 {
     public BrowserProxyStatus GetStatus() => status;
+}
+
+internal sealed class UnavailableTunnelEgress : IVpnTunnelEgressReadiness
+{
+    public bool TryGetTunnelInterfaceIndex(out int interfaceIndex)
+    {
+        interfaceIndex = 0;
+        return false;
+    }
+}
+
+internal sealed class TestServiceVersion : IBrowserIntegrationServiceVersion
+{
+    public string ServiceVersion { get; } = "test-host";
+}
+
+internal sealed class TestInterfaceLookup : IVpnInterfaceNameLookup
+{
+    public string? TryGetInterfaceName(int interfaceIndex) => null;
 }

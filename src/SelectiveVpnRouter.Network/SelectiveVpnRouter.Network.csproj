@@ -9,5 +9,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="SelectiveVpnRouter.Core.Tests" />
+    <InternalsVisibleTo Include="SelectiveVpnRouter.Probe" />
   </ItemGroup>
 </Project>

@@ -2,6 +2,12 @@
 
 **Phase 5 status:** integrated and **FULL PASS** in `ext-vpn-route` (automated + Yandex manual acceptance against a live Service). This repo holds the authoritative store and read-only pipe; see acceptance details in `ext-vpn-route/docs/phase5-acceptance.md`.
 
+**Browser Integration Port v1 — Slice 8 ACCEPTED:** Integration API v1 manifest, explicit loopback SOCKS5 browser proxy, VPN egress readiness, client heartbeat/stale semantics, VPN-bound DNS (OpenVPN PUSH), fail-closed browser routing, MV3 alarm-driven endpoint recovery in `ext-vpn-route`, real Yandex acceptance. Release baseline **807/807 PASS**.
+
+**Slice 9A (in progress, not deployed):** Service-side write methods `upsertRule`, `deleteRule`, `resetRules` with optimistic `expectedRevision` on this pipe. Native Host and extension remain read-only until Slice 9B.
+
+**Runtime manifest (read):** `getManifest` publishes `integrationApiVersion` (`1`), `serviceVersion`, sorted `capabilities`, runtime `browserProxy`, `vpnEgress`, and `browserClient`. Contract fixture: `tests/contracts/browser-routing-v1/integration-manifest-v1.example.json`.
+
 The Service is the **only source of truth** for browser routing: which hostnames the browser sends through the VPN.
 
 - The VPN Route browser extension (repository `ext-vpn-route`) is a read-only consumer and owns PAC application.
@@ -29,7 +35,7 @@ browser extension → NativeHost.exe → \\.\pipe\SelectiveVpnRouter.BrowserRout
 | --- | --- |
 | rules, defaultRoute | Service (`BrowserRoutingStateStore`) |
 | `stateGeneration` (UUID), `revision` | Service only; persisted, survive restart |
-| explicit browser proxy readiness | Service; Phase 5: always `Unavailable` |
+| explicit browser proxy readiness | Service runtime (`RuntimeBrowserProxyReadiness`); loopback SOCKS may be **Ready** while VPN is down |
 | assembling pages, validation, lineage decisions, PAC | extension |
 | relay of exactly two read-only calls | Native host |
 
@@ -107,7 +113,8 @@ Extending it would give a browser-launched process access to control commands. T
 - snapshot paging, including 10000 worst-case rules within the budget;
 - dispatcher;
 - the real pipe: DACL, `FirstPipeInstance`, framing limits, timeouts;
-- source guards: no sockets, listeners or process launch; no Everyone, AuthUsers or Users SIDs; no VPN control calls; exactly two dispatcher methods; production proxy readiness is `Unavailable`.
+- source guards: no sockets, listeners or process launch; no Everyone, AuthUsers or Users SIDs; no VPN control calls; exactly two dispatcher methods;
+- integration manifest fields, heartbeat params, client tracker TTL (120s), runtime `vpnEgress` / `browserClient` / `browserProxy` (no revision impact).
 
 `tests/SelectiveVpnRouter.BrowserRouting.TestHost` is a console host for cross-process E2E from `ext-vpn-route` (`npm run test:e2e`):
 
@@ -118,8 +125,25 @@ Extending it would give a browser-launched process access to control commands. T
 dotnet test SelectiveVpnRouter.sln -c Release
 ```
 
+## Integration manifest (Slice 5)
+
+| Field | Semantics |
+| --- | --- |
+| `integrationApiVersion` | Major-only integer (`1`); breaking changes → `2` |
+| `serviceVersion` | Informational assembly version; not a compat gate |
+| `capabilities` | Implemented features only (`browserRoutingState`, `browserExplicitSocks`, `vpnEgressReadiness`, `browserClientHeartbeat`) |
+| `browserProxy` | Runtime loopback SOCKS from Slice 4; **Ready** independent of VPN |
+| `vpnEgress` | Live `IVpnTunnelEgressReadiness` on RouterEngine; no cached mirror state |
+| `browserClient` | In-memory last contact (`NeverSeen` / `RecentlySeen` / `Stale`, TTL **120s**) |
+
+**Heartbeat:** `getManifest` without `params` remains valid (bootstrap / Phase 5). Optional `params.client` with `extensionVersion` and `nativeHostVersion` updates the tracker only after strict validation. Bootstrap without params does **not** touch `browserClient`. Runtime fields never change `stateGeneration` or `revision`. Dynamic `browserProxy.endpoint` after listener restart does not bump revision (PAC reapply is the extension’s job in Slice 6).
+
 ## Not implemented
 
-- explicit browser proxy (loopback listener); the manifest always reports `Unavailable` with `endpoint: null`;
-- editing browser rules (UI or IPC);
-- push notifications; the extension polls via Native Messaging.
+- editing browser rules (UI or IPC) — slice 9 / separate spec;
+- push notifications; the extension polls via Native Messaging;
+- `browserRuleWrite` capability.
+
+## Yandex Browser (application vs browser path)
+
+Application routing for `yandex.exe` remains **Direct** (no whole-browser WFP/VPN redirect). Per-domain VPN in the browser uses the extension PAC → loopback SOCKS path only (see Integration Port spec).

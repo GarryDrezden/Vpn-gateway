@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using SelectiveVpnRouter.Core.Portable;
 using SelectiveVpnRouter.Network;
+using SelectiveVpnRouter.Probe;
 
 Console.OutputEncoding = Encoding.UTF8;
 Console.InputEncoding = Encoding.UTF8;
@@ -24,12 +25,24 @@ if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
           --via-proxy HOST:PORT
           --bind-if INDEX
           --public-ip [URL]
+          --diag-vpn-dns-udp --if-index N --hostname HOST --server IP [--timeout-ms MS]
+          --diag-vpn-dns-resolver --if-index N --hostname HOST --servers IP,IP,... [--timeout-ms MS]
 
         Add this executable as an Application VPN rule, then --http to verify isolation.
         Without a rule, the same commands should stay DIRECT.
         --spawn starts another executable (policy follows that child, not this parent).
         """);
     return 0;
+}
+
+if (args.Contains("--diag-vpn-dns-udp"))
+{
+    return await VpnDnsDiagCommands.RunUdpProbeAsync(args);
+}
+
+if (args.Contains("--diag-vpn-dns-resolver"))
+{
+    return await VpnDnsDiagCommands.RunResolverProbeAsync(args);
 }
 
 if (args.Contains("--smoke-network-catalog"))

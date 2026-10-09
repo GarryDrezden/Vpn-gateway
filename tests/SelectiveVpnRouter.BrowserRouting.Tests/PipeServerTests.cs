@@ -17,7 +17,7 @@ public sealed class PipeServerTests : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        var dispatcher = new BrowserRoutingIpcDispatcher(() => _snapshot, new UnavailableBrowserProxyReadiness());
+        var dispatcher = DispatcherTestFactory.Create(() => _snapshot);
         var server = new BrowserRoutingPipeServer(_pipeName, dispatcher, line => { lock (_log) _log.Add(line); });
         _server = Task.Run(() => server.RunAsync(_stop.Token));
         return Task.CompletedTask;
@@ -124,7 +124,7 @@ public sealed class PipeServerTests : IAsyncLifetime
     public async Task Second_server_on_the_same_name_refuses_to_start()
     {
         await ExchangeAsync(Ipc.Manifest());
-        var dispatcher = new BrowserRoutingIpcDispatcher(() => _snapshot, new UnavailableBrowserProxyReadiness());
+        var dispatcher = DispatcherTestFactory.Create(() => _snapshot);
         var squatter = new BrowserRoutingPipeServer(_pipeName, dispatcher, _ => { });
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await Assert.ThrowsAnyAsync<Exception>(() => squatter.RunAsync(cts.Token));

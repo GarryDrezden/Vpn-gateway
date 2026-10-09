@@ -47,13 +47,16 @@ public class SourceSecurityTests
         Assert.NotEqual(BrowserRoutingIpcProtocol.PipeName, SelectiveVpnRouter.Core.AppPaths.PipeName);
         var program = File.ReadAllText(Path.Combine(Repo.Root, "src", "SelectiveVpnRouter.Service", "Program.cs"));
         Assert.Contains("AddHostedService<BrowserRoutingPipeHost>()", program);
-        Assert.Contains("new UnavailableBrowserProxyReadiness()", File.ReadAllText(HostFile));
+        Assert.Contains("AddBrowserExplicitProxyRuntime()", program);
+        var host = File.ReadAllText(HostFile);
+        Assert.Contains("IBrowserProxyReadiness proxyReadiness", host);
+        Assert.DoesNotContain("new UnavailableBrowserProxyReadiness()", host);
     }
 
     [Fact]
-    public void Production_proxy_readiness_is_unavailable()
+    public void Runtime_proxy_readiness_starts_unavailable()
     {
-        var status = new UnavailableBrowserProxyReadiness().GetStatus();
+        var status = new RuntimeBrowserProxyReadiness().GetStatus();
         Assert.Equal(BrowserProxyStatus.Unavailable, status.Status);
         Assert.Null(status.EndpointHost);
         Assert.Null(status.EndpointPort);

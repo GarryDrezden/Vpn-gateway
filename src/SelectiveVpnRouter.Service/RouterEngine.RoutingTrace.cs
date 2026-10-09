@@ -1,5 +1,7 @@
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Core.BrowserRouting;
 using SelectiveVpnRouter.Core.RoutingTrace;
+using SelectiveVpnRouter.Network;
 
 namespace SelectiveVpnRouter.Service;
 
@@ -7,8 +9,12 @@ public sealed partial class RouterEngine
 {
     private readonly RoutingTraceHost _routingTrace = new(new WindowsPackagedApplicationPathResolver());
 
-    public RouterEngine()
+    public RouterEngine(
+        Lazy<IBrowserIntegrationSnapshotProvider> browserIntegrationSnapshot,
+        VpnSessionDnsStore sessionDns)
     {
+        _browserIntegrationSnapshot = browserIntegrationSnapshot;
+        _sessionDns = sessionDns;
         _routingTrace.BindConfigProvider(() => Config);
     }
 

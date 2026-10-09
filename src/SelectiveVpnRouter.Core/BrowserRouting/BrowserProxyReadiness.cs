@@ -14,11 +14,7 @@ public interface IBrowserProxyReadiness
     BrowserProxyStatus GetStatus();
 }
 
-/// <summary>
-/// The production explicit browser proxy does not exist yet: the Service always reports Unavailable,
-/// so no browser applies a PAC with an endpoint nobody listens on. The transparent app-routing proxy
-/// (<c>ServiceSnapshot.ProxyPort</c>) is a different component and is never reported here.
-/// </summary>
+/// <summary>Stub for tests; production Service uses <see cref="RuntimeBrowserProxyReadiness"/>.</summary>
 public sealed class UnavailableBrowserProxyReadiness : IBrowserProxyReadiness
 {
     public BrowserProxyStatus GetStatus() => BrowserProxyStatus.NotAvailable;

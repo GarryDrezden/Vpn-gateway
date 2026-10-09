@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Core.BrowserRouting;
+using SelectiveVpnRouter.Network;
 using SelectiveVpnRouter.Service;
 
 TextEncodingBootstrap.EnsureRegistered();
@@ -26,7 +28,10 @@ if (mode is "--help" or "-h")
 
 HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddWindowsService(o => o.ServiceName = "SelectiveVpnRouter");
-builder.Services.AddSingleton<RouterEngine>();
+builder.Services.AddBrowserExplicitProxyRuntime();
+builder.Services.AddSingleton(sp => new RouterEngine(
+    new Lazy<IBrowserIntegrationSnapshotProvider>(() => sp.GetRequiredService<IBrowserIntegrationSnapshotProvider>()),
+    sp.GetRequiredService<VpnSessionDnsStore>()));
 builder.Services.AddHostedService<PipeIpcHost>();
 builder.Services.AddHostedService<BrowserRoutingPipeHost>();
 if (!mode.Equals("--console", StringComparison.OrdinalIgnoreCase)

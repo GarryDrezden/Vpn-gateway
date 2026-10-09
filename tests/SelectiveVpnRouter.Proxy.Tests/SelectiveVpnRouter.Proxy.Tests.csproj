@@ -9,6 +9,8 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <ProjectReference Include="..\..\src\SelectiveVpnRouter.Core\SelectiveVpnRouter.Core.csproj" />
+    <ProjectReference Include="..\..\src\SelectiveVpnRouter.Network\SelectiveVpnRouter.Network.csproj" />
     <ProjectReference Include="..\..\src\SelectiveVpnRouter.Proxy\SelectiveVpnRouter.Proxy.csproj" />
   </ItemGroup>
 </Project>

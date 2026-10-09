@@ -33,6 +33,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
     private VpnAdapterSelection? _vpnAdapterSelection;
     private AdapterView? _directAdapter;
     private IReadOnlyList<AdapterView> _beforeConnect = [];
+    private readonly VpnSessionDnsStore _sessionDns;
 
     public AppConfiguration Config
     {
@@ -105,6 +106,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
                 ? "Optional QUIC/UDP 443 block for VPN-routed apps is enabled (forces TCP fallback). Full UDP routing is not implemented."
                 : "UDP/QUIC per-process routing is unsupported in this MVP (TCP only). Optional QUIC block is off.",
             WorkVpn = BuildWorkVpnSnapshot(),
+            BrowserIntegration = _browserIntegrationSnapshot.Value.Create(),
         };
     }
 
@@ -130,9 +132,10 @@ public sealed partial class RouterEngine : IAsyncDisposable
         Log("profile-scan dangerousDirectives=" + safety.Findings.Count);
 
         await DisconnectAsync().ConfigureAwait(false);
+        _sessionDns.Clear();
         _beforeConnect = AdapterCatalog.All();
         _directAdapter = PickDirect(_beforeConnect);
-        _vpn = new OpenVpnController();
+        _vpn = new OpenVpnController(_sessionDns);
         try
         {
             OpenVpnVersionResult version = await OpenVpnController.ReadVersionAsync(exe).ConfigureAwait(false);
@@ -209,6 +212,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
 
             _loopCts = new CancellationTokenSource();
             _ = Task.Run(() => ReconcileLoop(_loopCts.Token), _loopCts.Token);
+            Log("vpn-session-dns count=" + _sessionDns.GetIpv4DnsServers().Count);
             Log("connect-complete elapsedMs=" + elapsed.ElapsedMilliseconds);
         }
         catch (Exception ex)
@@ -244,6 +248,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
 
         _vpnAdapter = null;
         _vpnAdapterSelection = null;
+        _sessionDns.Clear();
         ConfigSerializer.ClearCrashState(AppPaths.CrashStateFile);
         _paused = false;
     }

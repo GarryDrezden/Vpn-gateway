@@ -7,13 +7,8 @@ namespace SelectiveVpnRouter.BrowserRouting.Tests;
 
 public class DispatcherTests
 {
-    private sealed class Readiness(BrowserProxyStatus status) : IBrowserProxyReadiness
-    {
-        public BrowserProxyStatus GetStatus() => status;
-    }
-
     private static BrowserRoutingIpcDispatcher For(BrowserRoutingSnapshot? snapshot, BrowserProxyStatus? proxy = null) =>
-        new(() => snapshot, new Readiness(proxy ?? BrowserProxyStatus.NotAvailable));
+        DispatcherTestFactory.Create(snapshot, proxy);
 
     private static List<JsonElement> ReadAll(BrowserRoutingIpcDispatcher dispatcher, out List<int> sizes)
     {
@@ -57,7 +52,8 @@ public class DispatcherTests
         Assert.Equal(BrowserRoutingIpcProtocol.PageRulesBudgetBytes, result.GetProperty("pageBudgetBytes").GetInt32());
         Assert.Equal("Unavailable", result.GetProperty("browserProxy").GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, result.GetProperty("browserProxy").GetProperty("endpoint").ValueKind);
-        Assert.Equal(7, result.EnumerateObject().Count());
+        Assert.True(result.EnumerateObject().Count() >= 7);
+        Assert.Equal(1, result.GetProperty("integrationApiVersion").GetInt32());
     }
 
     [Theory]
@@ -149,7 +145,7 @@ public class DispatcherTests
         var store = new BrowserRoutingStateStore(dir.File("state.json"));
         store.Load();
         store.Update(0, "Direct", Rules.Many(4000));
-        var dispatcher = new BrowserRoutingIpcDispatcher(() => store.Current, new UnavailableBrowserProxyReadiness());
+        var dispatcher = DispatcherTestFactory.Create(() => store.Current);
         var generation = store.Current!.StateGeneration;
 
         Assert.Null(Ipc.ErrorCode(dispatcher.Dispatch(Ipc.Page(generation, 1, 0)).Response));

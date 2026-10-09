@@ -13,6 +13,7 @@ using System.Windows.Media;
 using Microsoft.Win32;
 using SelectiveVpnRouter.Core;
 using SelectiveVpnRouter.Core.ApplicationDiscovery;
+using SelectiveVpnRouter.Core.BrowserRouting;
 using SelectiveVpnRouter.Core.Portable;
 using SelectiveVpnRouter.Core.RoutingTrace;
 using Forms = System.Windows.Forms;
@@ -296,6 +297,30 @@ public partial class MainWindow : Window
         HomeVpnStatusDot.Fill = new SolidColorBrush(Color.FromRgb(0xDC, 0x26, 0x26));
     }
 
+    private void UpdateBrowserIntegrationUi(ServiceSnapshot snap)
+    {
+        BrowserIntegrationUiPresentation.ViewModel vm =
+            BrowserIntegrationUiPresentation.Map(snap.BrowserIntegration, DateTimeOffset.UtcNow);
+        HomeBrowserExtensionText.Text = vm.ExtensionStatus;
+        HomeBrowserApiText.Text = vm.BrowserApi;
+        HomeBrowserProxyText.Text = vm.BrowserProxyStatus;
+        HomeBrowserSocksText.Text = vm.SocksEndpoint;
+        HomeBrowserVpnEgressText.Text = vm.VpnEgressStatus;
+        HomeBrowserVpnInterfaceText.Text = vm.VpnInterface;
+        HomeBrowserRuleCountText.Text = vm.RuleCount;
+        HomeBrowserLastContactText.Text = vm.LastContact;
+        if (string.IsNullOrWhiteSpace(vm.DetailLine))
+        {
+            HomeBrowserDetailText.Visibility = Visibility.Collapsed;
+            HomeBrowserDetailText.Text = "";
+        }
+        else
+        {
+            HomeBrowserDetailText.Text = vm.DetailLine;
+            HomeBrowserDetailText.Visibility = Visibility.Visible;
+        }
+    }
+
     private void UpdateHomePage(ServiceSnapshot snap, bool vpnConnected)
     {
         UpdateHomeWorkVpn(snap);
@@ -366,6 +391,7 @@ public partial class MainWindow : Window
     private void UpdateHomeDashboard(ServiceSnapshot snap, bool vpnConnected)
     {
         UpdateHomePage(snap, vpnConnected);
+        UpdateBrowserIntegrationUi(snap);
         HomeVpnAddressText.Text = snap.VpnAdapter?.Ipv4.FirstOrDefault() ?? "—";
         DateTimeOffset activityCutoff = DateTimeOffset.UtcNow.AddMinutes(-5);
         var recentUserFlows = FlowPresentationHelper.SelectUserFlows(snap.Flows, 100)
