@@ -120,21 +120,56 @@ Output: `artifacts\portable\VPN-Route-<version>-x64.zip` and matching folder.
 Developer deploy (framework-dependent publish) remains `scripts\update-desktop.ps1` → `artifacts\publish`.
 
 
-## Developer update command
+## Developer install/update (VPN Route + browser extension)
 
-Primary dev workflow from repo root (elevated PowerShell):
+**Slice 10A — ACCEPTED / COMPLETE:** unified developer install/update workflow.
+
+**Canonical command** (elevated Windows PowerShell 5.1 from this repo):
+
+```powershell
+cd "E:\Работа\OSPanel\domains\vpn-gateway"
+powershell -ExecutionPolicy Bypass -File .\scripts\install-vpn-route.ps1
+```
+
+Read-only audit (no builds, no Service deploy, no registry writes, no BrowserRouting writes):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-vpn-route.ps1 -CheckOnly
+```
+
+Order: **extension repo build/tests first** → `update-desktop.ps1` (Service/App) → register production native host (`com.vpnroute.browser`) → read-only integration verify → print path to `ext-vpn-route\dist\extension`.
+
+Parameters:
+
+- `-ExtensionRepoPath` — path to sibling `ext-vpn-route` (default: `..\ext-vpn-route` or `EXT_VPN_ROUTE_ROOT`)
+- `-CheckOnly` — status only; see command above
+- `-VerboseOutput` — show PASS lines on console (full detail in `artifacts/logs/install-vpn-route-*.log`)
+
+**Before a full install/update:** close **SelectiveVpnRouter.App** (GUI). The orchestrator warns if it is open; `update-desktop.ps1` stops VPN Route runtime during publish.
+
+The installer does **not** reload the Chromium/Yandex extension. After success, reload at `browser://extensions` or load unpacked from the printed `dist\extension` folder (production ID `lfaekfalhkgmbfdjjlfcalanhijeaien`).
+
+Post-install verification is **read-only** (native host ping + integration manifest); it does not call rule write RPCs.
+
+Failures **before** the first `update-desktop.ps1` run report `INSTALL FAILED BEFORE UPDATE` / `No live changes were made.` Failures after Service publish report `Partial update...`.
+
+**Parser gate (Windows PowerShell 5.1):** `scripts\validate-install-vpn-route-parse.ps1` (also exercised from ext-vpn-route orchestrator tests).
+
+Yandex Browser uses the **Chrome** native-messaging registry key (`HKCU\Software\Google\Chrome\NativeMessagingHosts\com.vpnroute.browser`) per ext-vpn-route acceptance docs.
+
+This orchestrator does **not** start, stop, or kill **external** OpenVPN processes.
+
+**Accepted test baselines (full install path):** ext-vpn-route **552** Node + **219** Native Host; vpn-gateway **823** via `update-desktop.ps1`.
+
+### Service/App only (legacy step)
 
 ```powershell
 .\scripts\update-desktop.ps1
 ```
 
-Runs **build -> tests -> publish -> service restart -> runtime smoke** with a short console summary. Full output is saved automatically to `artifacts/logs/update-desktop-*.log`.
+Runs **build -> tests -> publish -> service restart -> runtime smoke**. Log: `artifacts/logs/update-desktop-*.log`.
 
-Verbose console output:
-
-```powershell
-.\scripts\update-desktop.ps1 -VerboseOutput
-```
+Verbose: `.\scripts\update-desktop.ps1 -VerboseOutput`
 ## What this is
 
 | Piece | Role |
