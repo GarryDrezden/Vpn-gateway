@@ -160,10 +160,12 @@ function Invoke-VpnRouteExtensionNpm {
     param(
         [Parameter(Mandatory = $true)][string]$ExtensionRoot,
         [Parameter(Mandatory = $true)][string]$ScriptName,
-        [string]$PassDetail = ''
+        [string]$PassDetail = '',
+        [switch]$ParseDotnetTestCount
     )
 
     Write-VpnRouteInstallLogLine "=== npm run $ScriptName (cwd: $ExtensionRoot) ==="
+    $output = ''
     Push-Location $ExtensionRoot
     try {
         $output = & npm run $ScriptName 2>&1 | Out-String
@@ -175,12 +177,40 @@ function Invoke-VpnRouteExtensionNpm {
     finally {
         Pop-Location
     }
-    Add-VpnRouteInstallStep -Label $ScriptName -Outcome PASS -Detail $PassDetail
+    $detail = $PassDetail
+    if ($ParseDotnetTestCount) {
+        $parsed = Get-VpnRouteDotnetTestCount -Output $output
+        if ($parsed) {
+            $detail = $parsed
+        }
+    }
+    Add-VpnRouteInstallStep -Label $ScriptName -Outcome PASS -Detail $detail
 }
 
 function Get-VpnRouteNpmTestCount {
     param([Parameter(Mandatory = $true)][string]$Output)
     if ($Output -match '# pass\s+(\d+)') { return $Matches[1] }
+    return ''
+}
+
+function Get-VpnRouteDotnetTestCount {
+    param([Parameter(Mandatory = $true)][string]$Output)
+
+    # dotnet test summary line: four comma-separated counts then duration (RU/EN labels; ASCII-only regex for PS 5.1).
+    foreach ($line in ($Output -split "`r?`n")) {
+        if ($line -notmatch 's\.\s*$') { continue }
+        if ($line -match '(\d+)\s*,\s*\S+\s+(\d+)\s*,\s*\S+\s+(\d+)\s*,\s*\S+\s+(\d+)\s*,\s*\S+\s+\d+\s*s\.\s*$') {
+            if ($Matches[1] -eq '0' -and $Matches[2] -eq $Matches[4]) {
+                return $Matches[4]
+            }
+        }
+    }
+
+    # Fallback: English Failed/Passed/Skipped/Total wording when duration line shape differs.
+    if ($Output -match 'Passed:\s+(\d+)\s*,\s*Skipped:\s+\d+\s*,\s*Total:\s+(\d+)') {
+        if ($Matches[1] -eq $Matches[2]) { return $Matches[2] }
+    }
+
     return ''
 }
 
@@ -198,7 +228,7 @@ function Invoke-VpnRouteExtensionBuildPhase {
         $npmCount = Get-VpnRouteNpmTestCount -Output $testOut
         Add-VpnRouteInstallStep -Label 'extension tests' -Outcome PASS -Detail $npmCount
 
-        Invoke-VpnRouteExtensionNpm -ExtensionRoot $ExtensionRoot -ScriptName 'test:native-host' -PassDetail '219'
+        Invoke-VpnRouteExtensionNpm -ExtensionRoot $ExtensionRoot -ScriptName 'test:native-host' -ParseDotnetTestCount
         Invoke-VpnRouteExtensionNpm -ExtensionRoot $ExtensionRoot -ScriptName 'build:native-host' -PassDetail 'published'
         Invoke-VpnRouteExtensionNpm -ExtensionRoot $ExtensionRoot -ScriptName 'build:extension:native' -PassDetail 'dist/extension'
     }
