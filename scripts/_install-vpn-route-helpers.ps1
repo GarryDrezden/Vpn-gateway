@@ -1,6 +1,6 @@
 # Shared helpers for install-vpn-route.ps1 (Slice 10A)
 
-$script:VpnRouteInstallScriptVersion = '1.0.0-slice10a'
+$script:VpnRouteInstallScriptVersion = '1.0.0'
 $script:VpnRouteProductionHostName = 'com.vpnroute.browser'
 $script:VpnRouteSpikeHostName = 'com.vpnroute.phase0b'
 $script:VpnRouteProductionExtensionId = 'lfaekfalhkgmbfdjjlfcalanhijeaien'
@@ -10,7 +10,8 @@ $script:VpnRouteExpectedCapabilities = @(
     'browserExplicitSocks'
     'browserRoutingState'
     'vpnEgressReadiness'
-    'browserRoutingWrite'
+    'browserRoutingWrite',
+    'browserRoutingPush'
 )
 
 if (-not (Get-Variable -Name VpnRouteInstallQuiet -Scope Global -ErrorAction SilentlyContinue)) { $global:VpnRouteInstallQuiet = $true }
@@ -242,7 +243,10 @@ function Invoke-VpnRouteNativeHostStatus {
 }
 
 function Invoke-VpnRouteReadOnlyIntegrationVerify {
-    param([Parameter(Mandatory = $true)][string]$ExtensionRoot)
+    param(
+        [Parameter(Mandatory = $true)][string]$ExtensionRoot,
+        [switch]$RequireBrowserRoutingPush
+    )
 
     $verify = Join-Path $ExtensionRoot 'scripts\verify-browser-integration-readonly.js'
     if (-not (Test-Path -LiteralPath $verify)) {
@@ -252,7 +256,11 @@ function Invoke-VpnRouteReadOnlyIntegrationVerify {
     Write-VpnRouteInstallLogLine '=== verify-browser-integration-readonly.js ==='
     Push-Location $ExtensionRoot
     try {
-        $out = & node $verify 2>&1 | Out-String
+        $verifyArgs = @($verify)
+        if ($RequireBrowserRoutingPush) {
+            $verifyArgs += '--require-browser-routing-push'
+        }
+        $out = & node @verifyArgs 2>&1 | Out-String
         Write-VpnRouteInstallLogLine $out
         if ($LASTEXITCODE -ne 0) {
             Write-VpnRouteInstallFailure -Phase 'integration verify' -Message 'read-only integration check failed.'

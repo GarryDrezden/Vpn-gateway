@@ -9,9 +9,10 @@ public class SourceSecurityTests
 {
     private static readonly string CoreDir = Path.Combine(Repo.Root, "src", "SelectiveVpnRouter.Core", "BrowserRouting");
     private static readonly string HostFile = Path.Combine(Repo.Root, "src", "SelectiveVpnRouter.Service", "BrowserRoutingPipeHost.cs");
+    private static readonly string EventsHostFile = Path.Combine(Repo.Root, "src", "SelectiveVpnRouter.Service", "BrowserRoutingEventsPipeHost.cs");
 
     private static IEnumerable<(string File, string Text)> Sources() =>
-        Directory.GetFiles(CoreDir, "*.cs").Append(HostFile).Select(f => (Path.GetFileName(f), File.ReadAllText(f)));
+        Directory.GetFiles(CoreDir, "*.cs").Append(HostFile).Append(EventsHostFile).Select(f => (Path.GetFileName(f), File.ReadAllText(f)));
 
     [Theory]
     [InlineData(@"\bTcpListener\b")]
@@ -51,6 +52,7 @@ public class SourceSecurityTests
         Assert.NotEqual(BrowserRoutingIpcProtocol.PipeName, SelectiveVpnRouter.Core.AppPaths.PipeName);
         var program = File.ReadAllText(Path.Combine(Repo.Root, "src", "SelectiveVpnRouter.Service", "Program.cs"));
         Assert.Contains("AddHostedService<BrowserRoutingPipeHost>()", program);
+        Assert.Contains("AddHostedService<BrowserRoutingEventsPipeHost>()", program);
         Assert.Contains("AddBrowserExplicitProxyRuntime()", program);
         var host = File.ReadAllText(HostFile);
         Assert.Contains("IBrowserProxyReadiness proxyReadiness", host);

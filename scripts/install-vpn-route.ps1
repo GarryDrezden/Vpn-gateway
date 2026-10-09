@@ -121,7 +121,7 @@ try {
     }
     Add-VpnRouteInstallStep -Label 'extension build' -Outcome PASS -Detail $script:VpnRouteProductionExtensionId
 
-    Invoke-VpnRouteReadOnlyIntegrationVerify -ExtensionRoot $extensionRoot
+    Invoke-VpnRouteReadOnlyIntegrationVerify -ExtensionRoot $extensionRoot -RequireBrowserRoutingPush
 
     Write-VpnRouteInstallLogLine "Browser registration: HKCU\Software\Google\Chrome\NativeMessagingHosts\$($script:VpnRouteProductionHostName) (Yandex reads Chrome key per repo acceptance docs)."
     Write-VpnRouteInstallDoneBanner -ExtensionRoot $extensionRoot

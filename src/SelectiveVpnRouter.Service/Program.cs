@@ -34,6 +34,7 @@ builder.Services.AddSingleton(sp => new RouterEngine(
     sp.GetRequiredService<VpnSessionDnsStore>()));
 builder.Services.AddHostedService<PipeIpcHost>();
 builder.Services.AddHostedService<BrowserRoutingPipeHost>();
+builder.Services.AddHostedService<BrowserRoutingEventsPipeHost>();
 if (!mode.Equals("--console", StringComparison.OrdinalIgnoreCase)
     && !Environment.UserInteractive)
 {

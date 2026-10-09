@@ -13,9 +13,12 @@ public static class BrowserExplicitServiceCollectionExtensions
         services.AddSingleton<IBrowserProxyReadiness>(sp => sp.GetRequiredService<RuntimeBrowserProxyReadiness>());
         services.AddSingleton<IBrowserIntegrationServiceVersion, EntryAssemblyBrowserIntegrationServiceVersion>();
         services.AddSingleton<BrowserClientTracker>();
+        services.AddSingleton<BrowserRoutingChangeNotifier>();
         services.AddSingleton(sp =>
         {
-            var store = new BrowserRoutingStateStore(BrowserRoutingStateStore.DefaultPath);
+            var store = new BrowserRoutingStateStore(
+                BrowserRoutingStateStore.DefaultPath,
+                changeNotifier: sp.GetRequiredService<BrowserRoutingChangeNotifier>());
             store.Load();
             return store;
         });

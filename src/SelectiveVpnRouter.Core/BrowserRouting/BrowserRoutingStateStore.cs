@@ -47,12 +47,14 @@ public sealed class BrowserRoutingStateStore
     private readonly string _backupPath;
     private readonly string _tempPath;
     private readonly Func<string> _newGeneration;
+    private readonly BrowserRoutingChangeNotifier? _changeNotifier;
     private volatile BrowserRoutingSnapshot? _current;
     private volatile string _unavailableReason = BrowserRoutingUnavailableReason.NotLoaded;
 
-    public BrowserRoutingStateStore(string path, Func<string>? newGeneration = null)
+    public BrowserRoutingStateStore(string path, Func<string>? newGeneration = null, BrowserRoutingChangeNotifier? changeNotifier = null)
     {
         _path = Path.GetFullPath(path);
+        _changeNotifier = changeNotifier;
         var dir = Path.GetDirectoryName(_path) ?? throw new ArgumentException("State path must include a directory.", nameof(path));
         _backupPath = Path.Combine(dir, Path.GetFileNameWithoutExtension(_path) + ".bak.json");
         _tempPath = _path + ".tmp";
@@ -133,6 +135,7 @@ public sealed class BrowserRoutingStateStore
     /// <summary>Upserts one rule by id in the current generation; bumps revision on success.</summary>
     public BrowserRoutingSnapshot UpsertRule(long expectedRevision, BrowserRoutingRule rule)
     {
+        BrowserRoutingSnapshot next;
         lock (_writeLock)
         {
             var current = _current ?? throw new BrowserRoutingUnavailableException(_unavailableReason);
@@ -146,17 +149,19 @@ public sealed class BrowserRoutingStateStore
                 rules[index] = rule;
             else
                 rules.Add(rule);
-            var next = BrowserRoutingSnapshot.Create(new BrowserRoutingState(
+            next = BrowserRoutingSnapshot.Create(new BrowserRoutingState(
                 current.StateGeneration, current.Revision + 1, current.State.DefaultRoute, rules));
             if (!Commit(next))
                 throw new BrowserRoutingPersistenceException();
-            return next;
         }
+        _changeNotifier?.PublishCommitted(next.StateGeneration, next.Revision);
+        return next;
     }
 
     /// <summary>Removes a rule by id; <see cref="BrowserRoutingRuleNotFoundException"/> when missing.</summary>
     public BrowserRoutingSnapshot DeleteRule(long expectedRevision, string id)
     {
+        BrowserRoutingSnapshot next;
         lock (_writeLock)
         {
             var current = _current ?? throw new BrowserRoutingUnavailableException(_unavailableReason);
@@ -167,17 +172,19 @@ public sealed class BrowserRoutingStateStore
             if (index < 0)
                 throw new BrowserRoutingRuleNotFoundException(id);
             rules.RemoveAt(index);
-            var next = BrowserRoutingSnapshot.Create(new BrowserRoutingState(
+            next = BrowserRoutingSnapshot.Create(new BrowserRoutingState(
                 current.StateGeneration, current.Revision + 1, current.State.DefaultRoute, rules));
             if (!Commit(next))
                 throw new BrowserRoutingPersistenceException();
-            return next;
         }
+        _changeNotifier?.PublishCommitted(next.StateGeneration, next.Revision);
+        return next;
     }
 
     /// <summary>Clears all rules and sets defaultRoute Direct in the same generation (revision bump unless already empty).</summary>
     public BrowserRoutingSnapshot ResetRules(long expectedRevision)
     {
+        BrowserRoutingSnapshot? committed = null;
         lock (_writeLock)
         {
             var current = _current ?? throw new BrowserRoutingUnavailableException(_unavailableReason);
@@ -191,8 +198,10 @@ public sealed class BrowserRoutingStateStore
                 current.StateGeneration, current.Revision + 1, BrowserRoutingContract.RouteDirect, []));
             if (!Commit(next))
                 throw new BrowserRoutingPersistenceException();
-            return next;
+            committed = next;
         }
+        _changeNotifier?.PublishCommitted(committed.StateGeneration, committed.Revision);
+        return committed;
     }
 
     /// <summary>

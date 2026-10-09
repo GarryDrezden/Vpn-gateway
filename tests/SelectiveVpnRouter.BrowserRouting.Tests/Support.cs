@@ -103,6 +103,9 @@ internal static class Ipc
 
     public static byte[] ResetRules(long expectedRevision, string id = "w-reset") =>
         Request(new { version = 1, id, method = "resetRules", @params = new { expectedRevision } });
+
+    public static byte[] SubscribeEvents(string id = "sub-1") =>
+        Request(new { version = 1, id, method = "subscribeEvents" });
 }
 
 internal sealed class TestServiceVersion(string value) : IBrowserIntegrationServiceVersion

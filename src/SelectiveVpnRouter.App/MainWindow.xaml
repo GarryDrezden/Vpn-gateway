@@ -460,6 +460,127 @@
         </TabControl>
       </TabItem>
 
+      <!-- BROWSER ROUTING -->
+      <TabItem Header="Браузер">
+        <DockPanel Margin="4">
+          <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="12" Margin="0,0,0,12">
+            <StackPanel>
+              <TextBlock Text="Интеграция с расширением" Style="{StaticResource SectionTitleText}" Margin="0,0,0,8"/>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="170"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Расширение" Style="{StaticResource SecondaryText}"/>
+                <TextBlock x:Name="BrowserTabExtensionText" Grid.Row="0" Grid.Column="1" Text="—"/>
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Browser Proxy" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                <TextBlock x:Name="BrowserTabProxyText" Grid.Row="1" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="SOCKS" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                <TextBlock x:Name="BrowserTabSocksText" Grid.Row="2" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="VPN egress" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                <TextBlock x:Name="BrowserTabVpnEgressText" Grid.Row="3" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Правил" Style="{StaticResource SecondaryText}" Margin="0,6,0,0"/>
+                <TextBlock x:Name="BrowserTabRuleCountText" Grid.Row="4" Grid.Column="1" Text="—" Margin="0,6,0,0"/>
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <Expander DockPanel.Dock="Bottom" Header="Дополнительно" Margin="0,12,0,0">
+            <StackPanel Margin="0,8,0,0">
+              <TextBlock Style="{StaticResource SecondaryText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                         Text="Сброс удаляет все правила маршрутизации сайтов. Маршрут по умолчанию станет «Напрямую»."/>
+              <Button Content="Сбросить все правила" Click="OnBrowserResetAllRules" Style="{StaticResource DangerButton}" HorizontalAlignment="Left"/>
+            </StackPanel>
+          </Expander>
+
+          <Border DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Padding="12" Margin="0,0,0,12">
+            <DockPanel LastChildFill="True">
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Content="Добавить правило" Click="OnBrowserAddRule" Style="{StaticResource PrimaryButton}" MinWidth="150"/>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="Маршрутизация сайтов" Style="{StaticResource SectionTitleText}" Margin="0,0,16,0"/>
+                <TextBox x:Name="BrowserRulesSearchBox" Width="220" Margin="0,0,12,0"
+                         ToolTip="Поиск по названию или домену" TextChanged="OnBrowserRulesFilterChanged"/>
+                <ToggleButton x:Name="BrowserFilterAll" Content="Все" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"
+                              IsChecked="True" Click="OnBrowserRulesFilterChanged"/>
+                <ToggleButton x:Name="BrowserFilterVpn" Content="VPN" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"
+                              Click="OnBrowserRulesFilterChanged"/>
+                <ToggleButton x:Name="BrowserFilterDirect" Content="Напрямую" Style="{StaticResource RouteToggleButton}" Margin="0,0,6,0"
+                              Click="OnBrowserRulesFilterChanged"/>
+                <ToggleButton x:Name="BrowserFilterDisabled" Content="Отключённые" Style="{StaticResource RouteToggleButton}"
+                              Click="OnBrowserRulesFilterChanged"/>
+              </StackPanel>
+            </DockPanel>
+          </Border>
+
+          <Border x:Name="BrowserRulesUnavailablePanel" DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Visibility="Collapsed" Margin="0,0,0,12">
+            <TextBlock x:Name="BrowserRulesUnavailableText" TextWrapping="Wrap" Style="{StaticResource SecondaryText}"/>
+          </Border>
+
+          <Border x:Name="BrowserRulesEmptyPanel" DockPanel.Dock="Top" Style="{StaticResource CardBorder}" Visibility="Collapsed" Margin="0,0,0,12">
+            <StackPanel HorizontalAlignment="Center" MaxWidth="480" Margin="12">
+              <TextBlock Text="Пока нет правил для сайтов." FontSize="16" FontWeight="SemiBold"
+                         HorizontalAlignment="Center" TextAlignment="Center"/>
+              <TextBlock Text="Добавьте домен, чтобы направить его через VPN или напрямую."
+                         Style="{StaticResource SecondaryText}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,16"/>
+              <Button Content="Добавить правило" Click="OnBrowserAddRule" Style="{StaticResource GhostButton}" HorizontalAlignment="Center"/>
+            </StackPanel>
+          </Border>
+
+          <Border x:Name="BrowserRulesListBorder" Style="{StaticResource CardBorder}" Padding="0">
+            <ListView x:Name="BrowserRulesList"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      VirtualizingPanel.IsVirtualizing="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling">
+              <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                  <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                  <Setter Property="Padding" Value="0"/>
+                  <Setter Property="Background" Value="Transparent"/>
+                </Style>
+              </ListView.ItemContainerStyle>
+              <ListView.ItemTemplate>
+                <DataTemplate>
+                  <Border Style="{StaticResource AppListRowBorder}">
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="160"/>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding Host}" Style="{StaticResource SecondaryText}"/>
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Text="{Binding MatchTypeLabel}" VerticalAlignment="Center" FontSize="12"/>
+                      <TextBlock Grid.Column="2" Text="{Binding RouteLabel}" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                      <CheckBox Grid.Column="3" Content="Вкл." IsChecked="{Binding Enabled, Mode=OneWay}"
+                                Tag="{Binding}" Checked="OnBrowserRuleEnabledChanged" Unchecked="OnBrowserRuleEnabledChanged"
+                                VerticalAlignment="Center" Margin="8,0"/>
+                      <Button Grid.Column="4" Content="Изменить" Tag="{Binding}" Click="OnBrowserEditRule"
+                              Style="{StaticResource SecondaryButton}" VerticalAlignment="Center" Margin="4,0"/>
+                      <Button Grid.Column="5" Content="Удалить" Tag="{Binding}" Click="OnBrowserDeleteRule"
+                              Style="{StaticResource DangerButton}" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ListView.ItemTemplate>
+            </ListView>
+          </Border>
+        </DockPanel>
+      </TabItem>
+
       <!-- CONNECTIONS -->
       <TabItem Header="Соединения">
         <Grid Margin="4">

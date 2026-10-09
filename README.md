@@ -225,6 +225,10 @@ A second copy of Probe **without** a VPN application rule should stay Direct.
 
 If the GUI, service, OpenVPN, or driver policy goes away, Direct internet must keep working. Use **EMERGENCY RESTORE** to drop only *this app's* routes, WFP filters, and managed OpenVPN.
 
+## Browser routing 1.0.0 RC
+
+VPN Route Service exposes authoritative browser routing state over a read-only IPC pipe; **1.0.0 RC** adds a push events pipe (`SelectiveVpnRouter.BrowserRouting.Events`) so the Chromium extension can sync after committed rule changes, with periodic alarm polling as fallback. Desktop remains the primary editor; the extension applies PAC from Service state.
+
 ## Docs
 
 - [Desktop launch](docs/DESKTOP_LAUNCH.md)

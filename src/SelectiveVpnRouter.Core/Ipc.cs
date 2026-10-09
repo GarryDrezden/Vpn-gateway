@@ -213,6 +213,10 @@ public static class IpcMethods
     public const string StopRoutingTrace = "StopRoutingTrace";
     public const string ClearRoutingTrace = "ClearRoutingTrace";
     public const string ExportRoutingTrace = "ExportRoutingTrace";
+    public const string GetBrowserRoutingSnapshot = "GetBrowserRoutingSnapshot";
+    public const string UpsertBrowserRule = "UpsertBrowserRule";
+    public const string DeleteBrowserRule = "DeleteBrowserRule";
+    public const string ResetBrowserRules = "ResetBrowserRules";
 }
 
 public static class VpnConnectBudget

@@ -30,6 +30,7 @@ namespace SelectiveVpnRouter.App;
 public partial class MainWindow : Window
 {
     private readonly ServiceClient _client = new();
+    private readonly BrowserRoutingAppSession _browserRoutingSession;
     private readonly ObservableCollection<ApplicationRuleRow> _appRules = [];
     private readonly ObservableCollection<ApplicationRuleRow> _filteredAppRules = [];
     private readonly ObservableCollection<RuleRow> _advancedRules = [];
@@ -68,6 +69,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _browserRoutingSession = new BrowserRoutingAppSession(new BrowserRoutingTransport(_client));
+        WireBrowserRoutingTab();
         ApplyWorkVpnFeatureVisibility();
         if (LayoutDebugOptions.Enabled)
         {
@@ -319,6 +322,8 @@ public partial class MainWindow : Window
             HomeBrowserDetailText.Text = vm.DetailLine;
             HomeBrowserDetailText.Visibility = Visibility.Visible;
         }
+
+        UpdateBrowserTabIntegration(snap);
     }
 
     private void UpdateHomePage(ServiceSnapshot snap, bool vpnConnected)

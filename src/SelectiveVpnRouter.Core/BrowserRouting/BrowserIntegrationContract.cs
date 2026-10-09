@@ -12,6 +12,7 @@ public static class BrowserIntegrationContract
         "browserExplicitSocks",
         "browserRoutingState",
         "browserRoutingWrite",
+        "browserRoutingPush",
         "vpnEgressReadiness",
     ];
 

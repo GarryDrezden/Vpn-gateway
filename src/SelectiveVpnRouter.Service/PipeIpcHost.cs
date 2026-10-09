@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Core.BrowserRouting;
 using SelectiveVpnRouter.Core.RoutingTrace;
 
 namespace SelectiveVpnRouter.Service;
@@ -12,9 +13,14 @@ namespace SelectiveVpnRouter.Service;
 public sealed class PipeIpcHost : BackgroundService
 {
     private readonly RouterEngine _engine;
+    private readonly BrowserRoutingStateStore _browserRoutingStore;
     private readonly SemaphoreSlim _connectGate = new(1, 1);
 
-    public PipeIpcHost(RouterEngine engine) => _engine = engine;
+    public PipeIpcHost(RouterEngine engine, BrowserRoutingStateStore browserRoutingStore)
+    {
+        _engine = engine;
+        _browserRoutingStore = browserRoutingStore;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -149,9 +155,27 @@ public sealed class PipeIpcHost : BackgroundService
                 IpcMethods.StopRoutingTrace => JsonSerializer.Serialize(_engine.StopRoutingTrace(), ConfigSerializer.JsonOptions),
                 IpcMethods.ClearRoutingTrace => ClearRoutingTrace(),
                 IpcMethods.ExportRoutingTrace => ExportRoutingTrace(req.PayloadJson),
+                IpcMethods.GetBrowserRoutingSnapshot => JsonSerializer.Serialize(
+                    BrowserRoutingControlIpc.ReadSnapshot(_browserRoutingStore), ConfigSerializer.JsonOptions),
+                IpcMethods.UpsertBrowserRule => JsonSerializer.Serialize(
+                    BrowserRoutingControlIpc.Upsert(_browserRoutingStore, BrowserRoutingControlIpc.ParseUpsert(req.PayloadJson)),
+                    ConfigSerializer.JsonOptions),
+                IpcMethods.DeleteBrowserRule => JsonSerializer.Serialize(
+                    BrowserRoutingControlIpc.Delete(_browserRoutingStore, BrowserRoutingControlIpc.ParseDelete(req.PayloadJson)),
+                    ConfigSerializer.JsonOptions),
+                IpcMethods.ResetBrowserRules => JsonSerializer.Serialize(
+                    BrowserRoutingControlIpc.ResetRules(_browserRoutingStore, BrowserRoutingControlIpc.ParseReset(req.PayloadJson)),
+                    ConfigSerializer.JsonOptions),
                 _ => throw new InvalidOperationException("Unknown method " + req.Method),
             };
             return new IpcResponse { Id = req.Id, Ok = true, PayloadJson = payload };
+        }
+        catch (BrowserRoutingControlException ex)
+        {
+            string? detailsJson = ex.Details is null
+                ? null
+                : JsonSerializer.Serialize(ex.Details, ConfigSerializer.JsonOptions);
+            return new IpcResponse { Id = req.Id, Ok = false, Error = ex.Code, PayloadJson = detailsJson };
         }
         catch (Exception ex)
         {
