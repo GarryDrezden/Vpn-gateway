@@ -805,6 +805,7 @@
           <TabControl x:Name="TestCenterCategoryTabs" Margin="0,0,0,4">
             <TabItem Header="Базовые">
           <StackPanel Margin="0,4,0,8">
+            <TextBlock x:Name="ProductVersionText" Style="{StaticResource SecondaryText}" FontSize="11" Margin="0,0,0,8"/>
             <Button Content="Запустить базовую диагностику" Click="OnRunBasicDiagnostics" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left"/>
             <TextBlock x:Name="BasicDiagSummaryText" TextWrapping="Wrap" Margin="0,8,0,10" FontWeight="SemiBold"/>
 

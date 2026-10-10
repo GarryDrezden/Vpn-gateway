@@ -142,6 +142,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
                 : "UDP/QUIC per-process routing is unsupported in this MVP (TCP only). Optional QUIC block is off.",
             WorkVpn = BuildWorkVpnSnapshot(),
             BrowserIntegration = _browserIntegrationSnapshot.Value.Create(),
+            ProductRelease = ProductVersionInfo.ToSnapshot(),
         };
     }
 

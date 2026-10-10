@@ -7,7 +7,29 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <Company>Selective VPN Router</Company>
-    <Product>Selective VPN Router</Product>
-    <Version>1.0.0</Version>
+    <Product>VPN Route</Product>
+    <!-- Single source: public target 1.0.0, RC build identity via ReleaseRevision (not SemVer 1.0.14). -->
+    <VpnRouteProductVersion>1.0.0</VpnRouteProductVersion>
+    <VpnRouteReleaseChannel>RC</VpnRouteReleaseChannel>
+    <VpnRouteReleaseRevision>14</VpnRouteReleaseRevision>
+    <Version>$(VpnRouteProductVersion)</Version>
+    <AssemblyVersion>$(VpnRouteProductVersion).$(VpnRouteReleaseRevision)</AssemblyVersion>
+    <FileVersion>$(VpnRouteProductVersion).$(VpnRouteReleaseRevision)</FileVersion>
+    <InformationalVersion Condition="'$(VpnRouteReleaseChannel)' != '' and '$(VpnRouteReleaseRevision)' != '0'">$(VpnRouteProductVersion) $(VpnRouteReleaseChannel)$(VpnRouteReleaseRevision)</InformationalVersion>
+    <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(VpnRouteProductVersion)</InformationalVersion>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>VpnRouteProductVersion</_Parameter1>
+      <_Parameter2>$(VpnRouteProductVersion)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>VpnRouteReleaseChannel</_Parameter1>
+      <_Parameter2>$(VpnRouteReleaseChannel)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>VpnRouteReleaseRevision</_Parameter1>
+      <_Parameter2>$(VpnRouteReleaseRevision)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

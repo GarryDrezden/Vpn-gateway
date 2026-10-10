@@ -27,6 +27,10 @@ public sealed record PortableManifestDocument
 {
     public string Product { get; init; } = "VPN Route";
     public string ProductVersion { get; init; } = "";
+    public string? DisplayVersion { get; init; }
+    public string? ReleaseChannel { get; init; }
+    public int? ReleaseRevision { get; init; }
+    public string? FileVersion { get; init; }
     public string Architecture { get; init; } = "x64";
     public string BuildCommit { get; init; } = "";
     public string ServiceVersion { get; init; } = "";

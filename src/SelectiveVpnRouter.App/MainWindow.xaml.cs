@@ -124,6 +124,7 @@ public partial class MainWindow : Window
 
     private async Task StartAsync()
     {
+        ProductVersionText.Text = AppBranding.ProductName + " " + AppBranding.DisplayVersion;
         if (!await EnsurePortableBootstrapReadyAsync())
         {
             return;

@@ -3,8 +3,9 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_common.ps1")
 
 $root = Get-SvrRepoRoot
-$props = [xml](Get-Content (Join-Path $root "Directory.Build.props"))
-$version = $props.Project.PropertyGroup.Version | Select-Object -First 1
+. (Join-Path $PSScriptRoot "_product-version.ps1")
+$productModel = Get-VpnRouteProductVersionModel -GatewayRoot $root
+$version = $productModel.ProductVersion
 if (-not $version) { $version = "0.0.0" }
 
 $commit = ""
@@ -19,7 +20,7 @@ $stage = Join-Path $root "artifacts\portable\$stageName"
 $zipPath = "$stage.zip"
 
 Write-Host "PORTABLE BUILD"
-Write-Host "version=$version commit=$commit"
+Write-Host "product=$($productModel.DisplayVersion) numeric=$($productModel.NumericVersion) commit=$commit"
 
 if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
@@ -70,6 +71,10 @@ $coreVer = (Get-Item (Join-Path $stage "SelectiveVpnRouter.Core.dll")).VersionIn
 $manifest = [ordered]@{
     product = "VPN Route"
     productVersion = $version
+    displayVersion = $productModel.DisplayVersion
+    releaseChannel = $productModel.ReleaseChannel
+    releaseRevision = $productModel.ReleaseRevision
+    fileVersion = $productModel.NumericVersion
     architecture = "x64"
     buildCommit = $commit
     serviceVersion = $serviceVer
@@ -80,7 +85,7 @@ $manifest = [ordered]@{
 ($manifest | ConvertTo-Json -Depth 3) | Set-Content -Path (Join-Path $stage "portable-manifest.json") -Encoding UTF8
 
 $readme = @"
-VPN Route portable package ($version)
+VPN Route portable package ($($productModel.DisplayVersion))
 
 1. Extract this folder anywhere local (not a UNC path).
 2. Run SelectiveVpnRouter.App.exe

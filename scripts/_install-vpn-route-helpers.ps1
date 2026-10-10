@@ -1,5 +1,7 @@
 # Shared helpers for install-vpn-route.ps1 (Slice 10A)
 
+. (Join-Path $PSScriptRoot '_product-version.ps1')
+
 $script:VpnRouteInstallScriptVersion = '1.0.0'
 $script:VpnRouteProductionHostName = 'com.vpnroute.browser'
 $script:VpnRouteSpikeHostName = 'com.vpnroute.phase0b'
@@ -31,9 +33,17 @@ function Initialize-VpnRouteInstallSession {
     New-Item -ItemType Directory -Force -Path $logDir | Out-Null
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $global:VpnRouteInstallLogPath = Join-Path $logDir "install-vpn-route-$stamp.log"
-    Write-VpnRouteInstallLogLine "VPN Route install/update orchestrator v$script:VpnRouteInstallScriptVersion"
+    $product = Get-VpnRouteProductVersionModel -GatewayRoot $GatewayRoot
+    Write-VpnRouteInstallLogLine "VPN Route installer"
+    Write-VpnRouteInstallLogLine "Product: $($product.DisplayVersion) (file $($product.NumericVersion))"
+    Write-VpnRouteInstallLogLine "Install orchestrator script v$script:VpnRouteInstallScriptVersion"
     Write-VpnRouteInstallLogLine "Started $(Get-Date -Format o)"
     Write-VpnRouteInstallLogLine "Gateway repo: $GatewayRoot"
+    if (-not $global:VpnRouteInstallQuiet) {
+        Write-Host ''
+        Write-Host 'VPN Route installer' -ForegroundColor Cyan
+        Write-Host ("Product: {0}" -f $product.DisplayVersion) -ForegroundColor White
+    }
 }
 
 function Write-VpnRouteInstallLogLine {
@@ -350,6 +360,9 @@ function Write-VpnRouteInstallDoneBanner {
 
     $dist = Join-Path $ExtensionRoot 'dist\extension'
     Write-Host ''
+    $gatewayRoot = Split-Path $PSScriptRoot -Parent
+    $product = Get-VpnRouteProductVersionModel -GatewayRoot $gatewayRoot
+    Write-Host ("Installed product identity: {0} ({1})" -f $product.DisplayVersion, $product.NumericVersion) -ForegroundColor DarkGray
     if ($CheckOnly) {
         Write-Host 'CHECK ONLY - no mutations performed.' -ForegroundColor Cyan
     }
