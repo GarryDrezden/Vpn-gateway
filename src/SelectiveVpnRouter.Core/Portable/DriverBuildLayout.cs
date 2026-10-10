@@ -19,6 +19,48 @@ public static class DriverBuildLayout
     public static string RollbackSysPath(string repoRoot)
         => Path.Combine(repoRoot, "artifacts", "driver", "rollback", PortableLayout.DriverSysName);
 
+    public static bool IsEphemeralDriverBuildPath(string? imagePath)
+    {
+        string? normalized = PublishRuntimeLifecyclePlanner.TryNormalizeDriverImagePath(imagePath);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        string full;
+        try
+        {
+            full = Path.GetFullPath(normalized);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+
+        string[] segments = full.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        for (int i = 0; i < segments.Length - 2; i++)
+        {
+            if (!string.Equals(segments[i], "artifacts", StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(segments[i + 1], "driver", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string bucket = segments[i + 2];
+            if (string.Equals(bucket, StagingFolderName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(bucket, "Release", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(bucket, "Debug", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(bucket, "rollback", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool LinkerOutputMustNotTargetRegisteredImagePath(string linkerOutputPath, string? registeredImagePath)
     {
         if (string.IsNullOrWhiteSpace(registeredImagePath))

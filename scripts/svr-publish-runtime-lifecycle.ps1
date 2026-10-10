@@ -83,6 +83,17 @@ function Test-SvrShouldStopDriverForPublishSwap {
         (Test-SvrPathUnderPublishDirectory -Path $Snapshot.DriverImagePath -PublishDir $PublishDir)
 }
 
+function Test-SvrIsEphemeralDriverBuildPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    try { $full = [IO.Path]::GetFullPath($Path) } catch { return $false }
+    $norm = $full -replace '/', '\'
+    return ($norm -match '\\artifacts\\driver\\staging\\') -or
+        ($norm -match '\\artifacts\\driver\\Release\\') -or
+        ($norm -match '\\artifacts\\driver\\Debug\\') -or
+        ($norm -match '\\artifacts\\driver\\rollback\\')
+}
+
 function Test-SvrShouldRepairDriverImagePathToPublishLayout {
     param(
         $Snapshot,
@@ -93,7 +104,11 @@ function Test-SvrShouldRepairDriverImagePathToPublishLayout {
         return $true
     }
 
-    return Test-SvrPathUnderPublishDirectory -Path $Snapshot.DriverImagePath -PublishDir $PublishDir
+    if (Test-SvrPathUnderPublishDirectory -Path $Snapshot.DriverImagePath -PublishDir $PublishDir) {
+        return $true
+    }
+
+    return Test-SvrIsEphemeralDriverBuildPath -Path $Snapshot.DriverImagePath
 }
 
 function Test-SvrShouldStopDriverForDirectoryCleanup {
@@ -304,8 +319,24 @@ function Start-SvrWindowsServiceForPublish {
         Start-Service -Name $ServiceName -ErrorAction Stop
     }
     catch {
+        $svc.Refresh()
+        if ($svc.Status -eq "Running") {
+            return
+        }
+
+        if ($_.Exception.InnerException -and $_.Exception.InnerException.Message -match '\b1056\b') {
+            $svc.Refresh()
+            if ($svc.Status -eq "Running") {
+                return
+            }
+        }
+
         $start = Invoke-SvrSc -ArgumentString "start $ServiceName" -IgnoreErrors
-        if ($start.ExitCode -ne 0) {
+        $svc.Refresh()
+        if ($svc.Status -eq "Running" -or $start.ExitCode -eq 0 -or $start.ExitCode -eq 1056) {
+            # SCM state is authoritative; sc.exe exit/localization is diagnostic only.
+        }
+        elseif ($start.ExitCode -ne 0) {
             $diag = Get-SvrWindowsServiceStateDiagnostics -ServiceName $ServiceName -IncludeStartAttempt
             throw "Service '$ServiceName' start failed (sc exit $($start.ExitCode)). Diagnostics: $diag"
         }
@@ -421,6 +452,16 @@ function Repair-SvrPublishRuntimeImagePaths {
     if (-not $repairDriverToPublish) {
         Write-SvrUpdateLogLine "runtime-repair: skipping callout ImagePath rewrite (driver registered outside publish tree)"
         return
+    }
+
+    if (-not (Test-Path -LiteralPath $driverSys)) {
+        $stagingSys = Get-SvrDriverStagingSysPath -Root (Get-SvrRepoRoot) -Configuration Release
+        if (Test-Path -LiteralPath $stagingSys) {
+            $driverDir = Split-Path $driverSys -Parent
+            New-Item -ItemType Directory -Force -Path $driverDir | Out-Null
+            Copy-Item -LiteralPath $stagingSys -Destination $driverSys -Force
+            Write-SvrUpdateLogLine "runtime-repair: copied staged driver -> publish runtime path"
+        }
     }
 
     $driver = Get-Service -Name $script:SvrDriverServiceName -ErrorAction SilentlyContinue

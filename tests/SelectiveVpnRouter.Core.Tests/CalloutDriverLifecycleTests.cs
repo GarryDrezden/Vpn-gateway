@@ -1,3 +1,4 @@
+using System.ServiceProcess;
 using SelectiveVpnRouter.Network;
 using Xunit;
 
@@ -6,26 +7,21 @@ namespace SelectiveVpnRouter.Core.Tests;
 public sealed class CalloutDriverLifecycleTests
 {
     [Fact]
-    public void Sc_query_state_line_shape_matches_parser_expectations()
+    public void Running_scm_state_maps_to_legacy_running_code()
     {
-        const string raw = """
-            SERVICE_NAME: SelectiveVpnCallout
-            TYPE               : 1  KERNEL_DRIVER
-            STATE              : 4  RUNNING
-            """;
-        int state = ParseStateFromSample(raw);
-        Assert.Equal(4, state);
+        Assert.True(CalloutDriverLifecycle.IsDriverServiceRunning((int)ServiceControllerStatus.Running));
+        Assert.False(CalloutDriverLifecycle.IsDriverServiceRunning((int)ServiceControllerStatus.Stopped));
     }
 
     [Fact]
     public void Already_running_queried_state_is_success_without_start()
     {
-        Assert.True(CalloutDriverLifecycle.IsDriverServiceRunning(4));
-        Assert.False(CalloutDriverLifecycle.IsDriverServiceRunning(1));
+        Assert.True(CalloutDriverLifecycle.IsRunningStatus(ServiceControllerStatus.Running));
+        Assert.False(CalloutDriverLifecycle.IsRunningStatus(ServiceControllerStatus.Stopped));
     }
 
     [Fact]
-    public void Start_outcome_treats_exit_1056_as_already_running()
+    public void Start_outcome_treats_1056_as_already_running()
     {
         Assert.True(CalloutDriverLifecycle.IsAlreadyRunningStartOutcome(1056, null));
         Assert.True(CalloutDriverLifecycle.IsAlreadyRunningStartOutcome(1, 1056));
@@ -33,27 +29,19 @@ public sealed class CalloutDriverLifecycleTests
     }
 
     [Fact]
-    public void Start_outcome_parses_localized_sc_error_number_without_win32_prefix()
+    public void Benign_already_running_exception_shapes_are_recognized()
     {
-        const string raw = """
-            [SC] StartService: ошибка: 1056:
-            Одна копия службы уже запущена.
-            """;
-        Assert.Equal(1056, CalloutDriverLifecycle.TryParseScWin32(raw));
-    }
-
-    [Fact]
-    public void Start_outcome_parses_english_win32_prefix()
-    {
-        const string raw = "[SC] StartService FAILED 1056:\nWIN32: 1056";
-        Assert.Equal(1056, CalloutDriverLifecycle.TryParseScWin32(raw));
+        Assert.True(CalloutDriverLifecycle.IsBenignAlreadyRunningException(new InvalidOperationException("already running")));
+        Assert.True(CalloutDriverLifecycle.IsBenignAlreadyRunningException(
+            new System.ComponentModel.Win32Exception(CalloutDriverLifecycle.ErrorServiceAlreadyRunning)));
+        Assert.False(CalloutDriverLifecycle.IsBenignAlreadyRunningException(new InvalidOperationException("missing service")));
     }
 
     [Fact]
     public void Genuine_start_failure_when_not_running_and_not_1056()
     {
         Assert.False(CalloutDriverLifecycle.IsAlreadyRunningStartOutcome(1060, 1060));
-        Assert.False(CalloutDriverLifecycle.IsDriverServiceRunning(1));
+        Assert.False(CalloutDriverLifecycle.IsDriverServiceRunning((int)ServiceControllerStatus.Stopped));
     }
 
     [Fact]
@@ -109,28 +97,14 @@ public sealed class CalloutDriverLifecycleTests
         Assert.Contains("return;", body, StringComparison.Ordinal);
     }
 
-    private static int ParseStateFromSample(string raw)
+    [Fact]
+    public void Lifecycle_does_not_parse_sc_query_output_for_authoritative_state()
     {
-        foreach (string line in raw.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
-        {
-            string trimmed = line.Trim();
-            if (trimmed.StartsWith("STATE", StringComparison.OrdinalIgnoreCase))
-            {
-                int colon = trimmed.IndexOf(':');
-                if (colon >= 0)
-                {
-                    string afterColon = trimmed[(colon + 1)..].Trim();
-                    int space = afterColon.IndexOf(' ');
-                    string token = space >= 0 ? afterColon[..space] : afterColon;
-                    if (int.TryParse(token, out int code))
-                    {
-                        return code;
-                    }
-                }
-            }
-        }
-
-        return -1;
+        string repo = FindRepoRoot()!;
+        string lifecycle = File.ReadAllText(Path.Combine(repo, "src", "SelectiveVpnRouter.Network", "CalloutDriverLifecycle.cs"));
+        Assert.DoesNotContain("RunSc(", lifecycle, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryParseScWin32", lifecycle, StringComparison.Ordinal);
+        Assert.Contains("ServiceController", lifecycle, StringComparison.Ordinal);
     }
 
     private static string? FindRepoRoot()

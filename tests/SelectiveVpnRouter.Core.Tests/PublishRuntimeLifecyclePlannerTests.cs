@@ -9,6 +9,7 @@ public class PublishRuntimeLifecyclePlannerTests
     private const string DriverUnderPublish = @"C:\dev\artifacts\publish\SelectiveVpnRouter\driver\SelectiveVpnCallout.sys";
     private const string DriverOutside = @"C:\Windows\System32\drivers\SelectiveVpnCallout.sys";
     private const string DriverReleaseBuild = @"C:\dev\artifacts\driver\Release\SelectiveVpnCallout.sys";
+    private const string DriverStagingBuild = @"C:\dev\artifacts\driver\staging\Release\SelectiveVpnCallout.sys";
 
     [Fact]
     public void Scenario_A_both_running_restores_both()
@@ -99,17 +100,21 @@ public class PublishRuntimeLifecyclePlannerTests
     }
 
     [Fact]
-    public void Scenario_H_release_build_driver_does_not_repair_to_publish_layout()
+    public void Scenario_H_ephemeral_build_driver_repairs_to_publish_layout()
     {
-        var snap = new PublishRuntimeSnapshot(
+        var releaseSnap = new PublishRuntimeSnapshot(
             ProductInstalled: true,
             ProductWasRunning: true,
             ProductImagePath: Path.Combine(PublishRoot, "SelectiveVpnRouter.Service.exe"),
             DriverInstalled: true,
             DriverWasRunning: true,
             DriverImagePath: DriverReleaseBuild);
+        var stagingSnap = releaseSnap with { DriverImagePath = DriverStagingBuild };
 
-        Assert.False(PublishRuntimeLifecyclePlanner.ShouldRepairDriverImagePathToPublishLayout(snap, PublishRoot));
+        Assert.True(PublishRuntimeLifecyclePlanner.ShouldRepairDriverImagePathToPublishLayout(releaseSnap, PublishRoot));
+        Assert.True(PublishRuntimeLifecyclePlanner.ShouldRepairDriverImagePathToPublishLayout(stagingSnap, PublishRoot));
+        Assert.True(DriverBuildLayout.IsEphemeralDriverBuildPath(DriverStagingBuild));
+        Assert.False(DriverBuildLayout.IsEphemeralDriverBuildPath(DriverOutside));
     }
 
     [Fact]

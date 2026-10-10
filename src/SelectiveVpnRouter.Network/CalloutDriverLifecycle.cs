@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using System.ComponentModel;
 using System.ServiceProcess;
 using SelectiveVpnRouter.Core.Portable;
 
@@ -7,8 +7,9 @@ namespace SelectiveVpnRouter.Network;
 /// <summary>Ensures the kernel callout driver service is running and the device can be opened.</summary>
 public static class CalloutDriverLifecycle
 {
-    private const int ServiceRunningState = 4;
     internal const int ErrorServiceAlreadyRunning = 1056;
+    internal static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
 
     public sealed record EnsureResult(bool ServiceRunning, bool DeviceOpenable, string? Error);
 
@@ -20,157 +21,137 @@ public static class CalloutDriverLifecycle
             return new EnsureResult(false, false, "Callout driver is supported on Windows only.");
         }
 
-        int state = TryQueryServiceState(PortableLayout.DriverServiceName);
-        if (state == ServiceRunningState)
+        ServiceController? controller = TryOpenServiceController(PortableLayout.DriverServiceName);
+        if (controller is null)
         {
-            return new EnsureResult(true, DriverEnvironment.DeviceOpenable(), null);
+            if (DriverEnvironment.FindSys() is null)
+            {
+                return new EnsureResult(false, false, "SelectiveVpnCallout.sys not found; driver is not installed.");
+            }
+
+            return new EnsureResult(false, false, "SelectiveVpnCallout service is not registered.");
         }
 
-        if (state < 0 && DriverEnvironment.FindSys() is null)
+        using (controller)
         {
-            return new EnsureResult(false, false, "SelectiveVpnCallout.sys not found; driver is not installed.");
-        }
+            controller.Refresh();
+            if (IsRunningStatus(controller.Status))
+            {
+                return SuccessFromState();
+            }
 
-        (int exitCode, int? win32, string raw) = RunSc("start " + PortableLayout.DriverServiceName);
-        int stateAfterStart = TryQueryServiceState(PortableLayout.DriverServiceName);
-        if (IsDriverServiceRunning(stateAfterStart))
-        {
+            if (!TryStartService(controller, out string? startError))
+            {
+                return new EnsureResult(false, false, startError);
+            }
+
+            if (!WaitForRunning(controller, StartTimeout, out string? waitError))
+            {
+                return new EnsureResult(false, false, waitError);
+            }
+
             return SuccessFromState();
         }
-
-        if (IsAlreadyRunningStartOutcome(exitCode, win32))
-        {
-            stateAfterStart = TryQueryServiceState(PortableLayout.DriverServiceName);
-            if (IsDriverServiceRunning(stateAfterStart))
-            {
-                return SuccessFromState();
-            }
-        }
-
-        if (exitCode == 0)
-        {
-            stateAfterStart = TryQueryServiceState(PortableLayout.DriverServiceName);
-            if (IsDriverServiceRunning(stateAfterStart))
-            {
-                return SuccessFromState();
-            }
-        }
-
-        string message = DescribeScFailure("start", PortableLayout.DriverServiceName, exitCode, win32, raw);
-        return new EnsureResult(false, false, message);
 
         EnsureResult SuccessFromState() => new(true, DriverEnvironment.DeviceOpenable(), null);
     }
 
-    internal static bool IsDriverServiceRunning(int queriedState) => queriedState == ServiceRunningState;
+    internal static bool IsRunningStatus(ServiceControllerStatus status) =>
+        status == ServiceControllerStatus.Running;
+
+    internal static bool IsDriverServiceRunning(int legacyStateCode) =>
+        legacyStateCode == (int)ServiceControllerStatus.Running;
 
     internal static bool IsAlreadyRunningStartOutcome(int exitCode, int? win32) =>
         exitCode == ErrorServiceAlreadyRunning || win32 == ErrorServiceAlreadyRunning;
 
-    internal static int TryQueryServiceState(string serviceName)
+    internal static bool IsBenignAlreadyRunningException(Exception exception)
     {
-        (int exitCode, _, string raw) = RunSc("query " + serviceName);
-        if (exitCode != 0)
+        if (exception is Win32Exception win32 && win32.NativeErrorCode == ErrorServiceAlreadyRunning)
         {
-            return -1;
+            return true;
         }
 
-        foreach (string line in raw.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
-        {
-            string trimmed = line.Trim();
-            if (trimmed.StartsWith("STATE", StringComparison.OrdinalIgnoreCase))
-            {
-                int colon = trimmed.IndexOf(':');
-                if (colon >= 0)
-                {
-                    string afterColon = trimmed[(colon + 1)..].Trim();
-                    int space = afterColon.IndexOf(' ');
-                    string token = space >= 0 ? afterColon[..space] : afterColon;
-                    if (int.TryParse(token, out int code))
-                    {
-                        return code;
-                    }
-                }
-            }
-        }
-
-        return -1;
+        return exception is InvalidOperationException invalid
+            && invalid.Message.Contains("already running", StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static (int ExitCode, int? Win32, string Raw) RunSc(string arguments)
+    private static ServiceController? TryOpenServiceController(string serviceName)
     {
-        var psi = new ProcessStartInfo
+        try
         {
-            FileName = "sc.exe",
-            Arguments = arguments,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        ProcessOutputEncoding.UseConsoleEncoding(psi);
-        using Process? process = Process.Start(psi);
-        if (process is null)
-        {
-            return (1, null, string.Empty);
+            return new ServiceController(serviceName);
         }
-
-        string raw = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
-        process.WaitForExit(8000);
-        return (process.ExitCode, TryParseScWin32(raw), raw);
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
-    internal static int? TryParseScWin32(string raw)
+    private static bool TryStartService(ServiceController controller, out string? error)
     {
-        const string prefix = "WIN32:";
-        int idx = raw.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        if (idx >= 0)
+        error = null;
+        controller.Refresh();
+        if (IsRunningStatus(controller.Status))
         {
-            int start = idx + prefix.Length;
-            int end = start;
-            while (end < raw.Length && char.IsDigit(raw[end]))
-            {
-                end++;
-            }
-
-            if (int.TryParse(raw[start..end], out int win32Code))
-            {
-                return win32Code;
-            }
+            return true;
         }
 
-        for (int i = 0; i < raw.Length; i++)
+        try
         {
-            if (raw[i] != ':')
+            if (controller.Status is ServiceControllerStatus.StopPending)
             {
+                controller.WaitForStatus(ServiceControllerStatus.Stopped, StartTimeout);
+            }
+
+            controller.Start();
+            return true;
+        }
+        catch (Exception ex) when (IsBenignAlreadyRunningException(ex))
+        {
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = "StartService SelectiveVpnCallout failed: " + ex.Message;
+            return false;
+        }
+    }
+
+    private static bool WaitForRunning(ServiceController controller, TimeSpan timeout, out string? error)
+    {
+        error = null;
+        DateTime deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            controller.Refresh();
+            if (IsRunningStatus(controller.Status))
+            {
+                return true;
+            }
+
+            if (controller.Status is ServiceControllerStatus.StartPending or ServiceControllerStatus.StopPending)
+            {
+                Thread.Sleep(PollInterval);
                 continue;
             }
 
-            int j = i + 1;
-            while (j < raw.Length && char.IsWhiteSpace(raw[j]))
+            if (controller.Status == ServiceControllerStatus.Stopped)
             {
-                j++;
+                Thread.Sleep(PollInterval);
+                continue;
             }
 
-            int k = j;
-            while (k < raw.Length && char.IsDigit(raw[k]))
-            {
-                k++;
-            }
-
-            if (k > j && int.TryParse(raw[j..k], out int colonCode))
-            {
-                return colonCode;
-            }
+            break;
         }
 
-        return null;
-    }
+        controller.Refresh();
+        if (IsRunningStatus(controller.Status))
+        {
+            return true;
+        }
 
-    private static string DescribeScFailure(string action, string serviceName, int exitCode, int? win32, string raw)
-    {
-        string win32Part = win32 is null ? "" : " WIN32=" + win32.Value;
-        string detail = string.IsNullOrWhiteSpace(raw) ? "" : " " + raw.Trim();
-        return "sc.exe " + action + " " + serviceName + " failed (exit " + exitCode + ")" + win32Part + "." + detail;
+        error = "SelectiveVpnCallout did not reach Running (SCM state=" + (int)controller.Status + ").";
+        return false;
     }
 }

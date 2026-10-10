@@ -25,13 +25,12 @@ public static class PublishRuntimeLifecyclePlanner
         IsPathUnderPublishRoot(driverImagePath, publishRoot);
 
     /// <summary>
-    /// Dev installs often register the callout under <c>artifacts\driver\Release</c>.
-    /// Repointing that service to the publish-tree copy via <c>sc config</c> can break SCM start (Win32 123).
-    /// Only rewrite ImagePath to the publish layout when the driver already lives under the publish root.
+    /// Repoint ephemeral build/staging registrations to the publish-tree runtime copy during install/update.
     /// </summary>
     public static bool ShouldRepairDriverImagePathToPublishLayout(PublishRuntimeSnapshot snapshot, string publishRoot) =>
         !snapshot.DriverInstalled
-        || IsPathUnderPublishRoot(snapshot.DriverImagePath, publishRoot);
+        || IsPathUnderPublishRoot(snapshot.DriverImagePath, publishRoot)
+        || DriverBuildLayout.IsEphemeralDriverBuildPath(snapshot.DriverImagePath);
 
     internal static bool IsPathUnderPublishRoot(string? candidatePath, string publishRoot)
     {
