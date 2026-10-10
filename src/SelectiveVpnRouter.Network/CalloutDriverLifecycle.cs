@@ -8,6 +8,7 @@ namespace SelectiveVpnRouter.Network;
 public static class CalloutDriverLifecycle
 {
     private const int ServiceRunningState = 4;
+    internal const int ErrorServiceAlreadyRunning = 1056;
 
     public sealed record EnsureResult(bool ServiceRunning, bool DeviceOpenable, string? Error);
 
@@ -31,14 +32,40 @@ public static class CalloutDriverLifecycle
         }
 
         (int exitCode, int? win32, string raw) = RunSc("start " + PortableLayout.DriverServiceName);
-        if (exitCode == 0 || win32 == 1056 || TryQueryServiceState(PortableLayout.DriverServiceName) == ServiceRunningState)
+        int stateAfterStart = TryQueryServiceState(PortableLayout.DriverServiceName);
+        if (IsDriverServiceRunning(stateAfterStart))
         {
-            return new EnsureResult(true, DriverEnvironment.DeviceOpenable(), null);
+            return SuccessFromState();
+        }
+
+        if (IsAlreadyRunningStartOutcome(exitCode, win32))
+        {
+            stateAfterStart = TryQueryServiceState(PortableLayout.DriverServiceName);
+            if (IsDriverServiceRunning(stateAfterStart))
+            {
+                return SuccessFromState();
+            }
+        }
+
+        if (exitCode == 0)
+        {
+            stateAfterStart = TryQueryServiceState(PortableLayout.DriverServiceName);
+            if (IsDriverServiceRunning(stateAfterStart))
+            {
+                return SuccessFromState();
+            }
         }
 
         string message = DescribeScFailure("start", PortableLayout.DriverServiceName, exitCode, win32, raw);
         return new EnsureResult(false, false, message);
+
+        EnsureResult SuccessFromState() => new(true, DriverEnvironment.DeviceOpenable(), null);
     }
+
+    internal static bool IsDriverServiceRunning(int queriedState) => queriedState == ServiceRunningState;
+
+    internal static bool IsAlreadyRunningStartOutcome(int exitCode, int? win32) =>
+        exitCode == ErrorServiceAlreadyRunning || win32 == ErrorServiceAlreadyRunning;
 
     internal static int TryQueryServiceState(string serviceName)
     {
@@ -93,23 +120,51 @@ public static class CalloutDriverLifecycle
         return (process.ExitCode, TryParseScWin32(raw), raw);
     }
 
-    private static int? TryParseScWin32(string raw)
+    internal static int? TryParseScWin32(string raw)
     {
         const string prefix = "WIN32:";
         int idx = raw.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
+        if (idx >= 0)
         {
-            return null;
+            int start = idx + prefix.Length;
+            int end = start;
+            while (end < raw.Length && char.IsDigit(raw[end]))
+            {
+                end++;
+            }
+
+            if (int.TryParse(raw[start..end], out int win32Code))
+            {
+                return win32Code;
+            }
         }
 
-        int start = idx + prefix.Length;
-        int end = start;
-        while (end < raw.Length && char.IsDigit(raw[end]))
+        for (int i = 0; i < raw.Length; i++)
         {
-            end++;
+            if (raw[i] != ':')
+            {
+                continue;
+            }
+
+            int j = i + 1;
+            while (j < raw.Length && char.IsWhiteSpace(raw[j]))
+            {
+                j++;
+            }
+
+            int k = j;
+            while (k < raw.Length && char.IsDigit(raw[k]))
+            {
+                k++;
+            }
+
+            if (k > j && int.TryParse(raw[j..k], out int colonCode))
+            {
+                return colonCode;
+            }
         }
 
-        return int.TryParse(raw[start..end], out int code) ? code : null;
+        return null;
     }
 
     private static string DescribeScFailure(string action, string serviceName, int exitCode, int? win32, string raw)
