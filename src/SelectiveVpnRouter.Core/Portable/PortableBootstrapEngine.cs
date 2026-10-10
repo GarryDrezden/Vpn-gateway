@@ -5,12 +5,17 @@ namespace SelectiveVpnRouter.Core.Portable;
 public sealed class PortableBootstrapEngine
 {
     private readonly ISystemBootstrapProbe _probe;
-    private readonly WindowsBootstrapMutator _mutator;
+    private readonly IBootstrapSystemMutator _mutator;
 
     public PortableBootstrapEngine(ISystemBootstrapProbe? probe = null)
+        : this(probe, mutator: null)
+    {
+    }
+
+    internal PortableBootstrapEngine(ISystemBootstrapProbe? probe, IBootstrapSystemMutator? mutator)
     {
         _probe = probe ?? new WindowsSystemBootstrapProbe();
-        _mutator = new WindowsBootstrapMutator(_probe);
+        _mutator = mutator ?? new WindowsBootstrapMutator(_probe);
     }
 
     public PortableBootstrapStatus GetStatus(string portableRoot, AppConfiguration? config = null)
@@ -65,12 +70,33 @@ public sealed class PortableBootstrapEngine
             return Fail(PortableBootstrapExitCodes.Failed, ex.Message, status);
         }
 
-        PortableIpcSmokeResult ipc = PortableIpcProbe.WaitForGetStatusReady();
+        TimeSpan poll = TimeSpan.FromMilliseconds(PortableIpcProbe.DefaultPollIntervalMs);
+        WindowsServiceScmSync.WaitOutcome serviceReady = PortableBootstrapPostRepairProbe.WaitForProductServiceRunning(
+            TimeSpan.FromMilliseconds(PortableBootstrapPostRepairProbe.DefaultProductServiceWaitMs),
+            poll);
         PortableBootstrapStatus finalStatus = GetStatus(root, config);
+        if (!serviceReady.Success)
+        {
+            return new PortableBootstrapCommandResult
+            {
+                Success = false,
+                ExitCode = PortableBootstrapExitCodes.ServiceRepairFailed,
+                Message = "VPN Route Service did not reach Running after repair. " + (serviceReady.Error ?? ""),
+                Status = finalStatus,
+            };
+        }
+
+        int ipcWaitMs = PortableBootstrapPostRepairProbe.IpcReadinessWaitMsOverrideForTests
+            ?? PortableBootstrapPostRepairProbe.DefaultIpcReadinessWaitMs;
+        PortableIpcSmokeResult ipc = PortableIpcProbe.WaitForGetStatusReady(
+            totalTimeoutMs: ipcWaitMs,
+            pollIntervalMs: PortableIpcProbe.DefaultPollIntervalMs,
+            perAttemptConnectTimeoutMs: PortableIpcProbe.PerAttemptConnectTimeoutMs);
+        finalStatus = GetStatus(root, config);
         if (!ipc.Ready)
         {
             string message =
-                $"Service did not respond to IPC after repair (attempts={ipc.Attempts}, elapsedMs={ipc.ElapsedMs}). "
+                $"Service is running but did not respond to IPC after repair (attempts={ipc.Attempts}, elapsedMs={ipc.ElapsedMs}). "
                 + (ipc.LastError ?? "Unknown IPC error.");
             return new PortableBootstrapCommandResult
             {

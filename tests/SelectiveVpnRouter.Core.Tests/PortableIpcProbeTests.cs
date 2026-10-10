@@ -3,6 +3,7 @@ using Xunit;
 
 namespace SelectiveVpnRouter.Core.Tests;
 
+[Collection("PortableBootstrapSerial")]
 public class PortableIpcProbeTests
 {
     [Fact]
