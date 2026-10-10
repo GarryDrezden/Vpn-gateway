@@ -6,22 +6,22 @@ namespace SelectiveVpnRouter.Core.Tests;
 public class ProductVersionInfoTests
 {
     [Fact]
-    public void Desktop_file_version_is_1_0_0_16()
+    public void Desktop_file_version_is_1_0_0_17()
     {
-        Assert.Equal("1.0.0.16", ProductVersionInfo.FileVersion);
+        Assert.Equal("1.0.0.17", ProductVersionInfo.FileVersion);
     }
 
     [Fact]
-    public void Desktop_display_version_is_1_0_0_RC16()
+    public void Desktop_display_version_is_1_0_0_RC17()
     {
-        Assert.Equal("1.0.0 RC16", ProductVersionInfo.DisplayVersion);
+        Assert.Equal("1.0.0 RC17", ProductVersionInfo.DisplayVersion);
     }
 
     [Fact]
     public void Product_version_base_is_1_0_0_not_1_0_14()
     {
         Assert.Equal("1.0.0", ProductVersionInfo.ProductVersion);
-        Assert.Equal(16, ProductVersionInfo.ReleaseRevision);
+        Assert.Equal(17, ProductVersionInfo.ReleaseRevision);
         Assert.Equal("RC", ProductVersionInfo.ReleaseChannel);
         Assert.NotEqual("1.0.14", ProductVersionInfo.ProductVersion);
     }
@@ -32,13 +32,13 @@ public class ProductVersionInfoTests
         ProductReleaseSnapshot snap = ProductVersionInfo.ToSnapshot();
         Assert.Equal("1.0.0", snap.ProductVersion);
         Assert.Equal("RC", snap.ReleaseChannel);
-        Assert.Equal(16, snap.ReleaseRevision);
-        Assert.Equal("1.0.0 RC16", snap.DisplayVersion);
-        Assert.Equal("1.0.0.16", snap.FileVersion);
+        Assert.Equal(17, snap.ReleaseRevision);
+        Assert.Equal("1.0.0 RC17", snap.DisplayVersion);
+        Assert.Equal("1.0.0.17", snap.FileVersion);
     }
 
     [Theory]
-    [InlineData("1.0.0", "RC", 16, "1.0.0 RC16")]
+    [InlineData("1.0.0", "RC", 17, "1.0.0 RC17")]
     [InlineData("1.0.0", "stable", 0, "1.0.0")]
     public void BuildDisplayVersion_follows_channel_model(string product, string channel, int revision, string expected)
     {
