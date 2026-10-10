@@ -5,7 +5,9 @@ public static class PublishRuntimeLifecyclePlanner
     public static PublishRuntimeRestorePlan PlanRestore(PublishRuntimeSnapshot snapshot) =>
         new(
             StartDriver: snapshot.DriverInstalled && snapshot.DriverWasRunning,
-            StartProduct: snapshot.ProductInstalled && snapshot.ProductWasRunning);
+            StartProduct: snapshot.ProductInstalled && snapshot.ProductWasRunning,
+            EnsureCalloutRegistrationBeforeProductStart:
+                PublishRuntimeCalloutRegistrationPlanner.ShouldEnsureCalloutRegistrationBeforeProductStart(snapshot));
 
     public static bool ShouldStopDriverForPublishSwap(PublishRuntimeSnapshot snapshot, string publishRoot) =>
         snapshot.DriverInstalled

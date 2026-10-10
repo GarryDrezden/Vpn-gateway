@@ -8,6 +8,7 @@ namespace SelectiveVpnRouter.Network;
 public static class CalloutDriverLifecycle
 {
     internal const int ErrorServiceAlreadyRunning = 1056;
+    internal const int ErrorServiceDoesNotExist = 1060;
     internal static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(30);
     internal static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
 
@@ -21,21 +22,24 @@ public static class CalloutDriverLifecycle
             return new EnsureResult(false, false, "Callout driver is supported on Windows only.");
         }
 
-        ServiceController? controller = TryOpenServiceController(PortableLayout.DriverServiceName);
-        if (controller is null)
+        ServiceController controller;
+        try
         {
-            if (DriverEnvironment.FindSys() is null)
-            {
-                return new EnsureResult(false, false, "SelectiveVpnCallout.sys not found; driver is not installed.");
-            }
-
-            return new EnsureResult(false, false, "SelectiveVpnCallout service is not registered.");
+            controller = new ServiceController(PortableLayout.DriverServiceName);
+        }
+        catch (Exception ex) when (IsServiceMissingException(ex))
+        {
+            return MissingDriverServiceResult();
         }
 
         using (controller)
         {
-            controller.Refresh();
-            if (IsRunningStatus(controller.Status))
+            if (!TryGetServiceStatus(controller, out ServiceControllerStatus status, out EnsureResult? missing))
+            {
+                return missing!;
+            }
+
+            if (IsRunningStatus(status))
             {
                 return SuccessFromState();
             }
@@ -54,6 +58,55 @@ public static class CalloutDriverLifecycle
         }
 
         EnsureResult SuccessFromState() => new(true, DriverEnvironment.DeviceOpenable(), null);
+    }
+
+    internal static EnsureResult MissingDriverServiceResult()
+    {
+        if (DriverEnvironment.FindSys() is null)
+        {
+            return new EnsureResult(false, false, "SelectiveVpnCallout.sys not found; driver is not installed.");
+        }
+
+        return new EnsureResult(false, false, "driver-service-not-registered");
+    }
+
+    internal static bool IsServiceMissingException(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is Win32Exception win32 && win32.NativeErrorCode == ErrorServiceDoesNotExist)
+            {
+                return true;
+            }
+
+            if (current is InvalidOperationException invalid
+                && invalid.Message.Contains("was not found", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool TryGetServiceStatus(
+        ServiceController controller,
+        out ServiceControllerStatus status,
+        out EnsureResult? failure)
+    {
+        failure = null;
+        try
+        {
+            controller.Refresh();
+            status = controller.Status;
+            return true;
+        }
+        catch (Exception ex) when (IsServiceMissingException(ex))
+        {
+            status = default;
+            failure = MissingDriverServiceResult();
+            return false;
+        }
     }
 
     internal static bool IsRunningStatus(ServiceControllerStatus status) =>
@@ -76,36 +129,34 @@ public static class CalloutDriverLifecycle
             && invalid.Message.Contains("already running", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static ServiceController? TryOpenServiceController(string serviceName)
-    {
-        try
-        {
-            return new ServiceController(serviceName);
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
-    }
-
     private static bool TryStartService(ServiceController controller, out string? error)
     {
         error = null;
-        controller.Refresh();
-        if (IsRunningStatus(controller.Status))
+        if (!TryGetServiceStatus(controller, out ServiceControllerStatus status, out EnsureResult? missing))
+        {
+            error = missing!.Error;
+            return false;
+        }
+
+        if (IsRunningStatus(status))
         {
             return true;
         }
 
         try
         {
-            if (controller.Status is ServiceControllerStatus.StopPending)
+            if (status is ServiceControllerStatus.StopPending)
             {
                 controller.WaitForStatus(ServiceControllerStatus.Stopped, StartTimeout);
             }
 
             controller.Start();
             return true;
+        }
+        catch (Exception ex) when (IsServiceMissingException(ex))
+        {
+            error = MissingDriverServiceResult().Error;
+            return false;
         }
         catch (Exception ex) when (IsBenignAlreadyRunningException(ex))
         {
@@ -124,19 +175,24 @@ public static class CalloutDriverLifecycle
         DateTime deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
         {
-            controller.Refresh();
-            if (IsRunningStatus(controller.Status))
+            if (!TryGetServiceStatus(controller, out ServiceControllerStatus status, out EnsureResult? missing))
+            {
+                error = missing!.Error;
+                return false;
+            }
+
+            if (IsRunningStatus(status))
             {
                 return true;
             }
 
-            if (controller.Status is ServiceControllerStatus.StartPending or ServiceControllerStatus.StopPending)
+            if (status is ServiceControllerStatus.StartPending or ServiceControllerStatus.StopPending)
             {
                 Thread.Sleep(PollInterval);
                 continue;
             }
 
-            if (controller.Status == ServiceControllerStatus.Stopped)
+            if (status == ServiceControllerStatus.Stopped)
             {
                 Thread.Sleep(PollInterval);
                 continue;
@@ -145,13 +201,18 @@ public static class CalloutDriverLifecycle
             break;
         }
 
-        controller.Refresh();
-        if (IsRunningStatus(controller.Status))
+        if (!TryGetServiceStatus(controller, out ServiceControllerStatus finalStatus, out EnsureResult? finalMissing))
+        {
+            error = finalMissing!.Error;
+            return false;
+        }
+
+        if (IsRunningStatus(finalStatus))
         {
             return true;
         }
 
-        error = "SelectiveVpnCallout did not reach Running (SCM state=" + (int)controller.Status + ").";
+        error = "SelectiveVpnCallout did not reach Running (SCM state=" + (int)finalStatus + ").";
         return false;
     }
 }

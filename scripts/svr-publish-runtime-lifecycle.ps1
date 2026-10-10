@@ -2,6 +2,10 @@
 
 $script:SvrProductServiceName = "SelectiveVpnRouter"
 $script:SvrDriverServiceName = "SelectiveVpnCallout"
+# Keep in sync with WindowsBootstrapMutator (delete/create SCM synchronization).
+$script:SvrScmServiceDeletionWaitSeconds = 60
+$script:SvrScmPollIntervalMs = 250
+$script:SvrScmCreateRetryAttempts = 30
 
 function ConvertFrom-SvrKernelImagePath {
     param([string]$ImagePath)
@@ -240,6 +244,95 @@ function Get-SvrWindowsServiceStateDiagnostics {
     return ($lines -join "; ")
 }
 
+function Test-SvrServiceRegisteredInScm {
+    param(
+        [Parameter(Mandatory = $true)][string]$ServiceName
+    )
+
+    try {
+        $controller = New-Object System.ServiceProcess.ServiceController $ServiceName
+        try {
+            $null = $controller.Status
+            return $true
+        }
+        finally {
+            $controller.Dispose()
+        }
+    }
+    catch [System.InvalidOperationException] {
+        return $false
+    }
+}
+
+function Wait-SvrScmServiceAbsent {
+    param(
+        [Parameter(Mandatory = $true)][string]$ServiceName,
+        [int]$TimeoutSeconds = $script:SvrScmServiceDeletionWaitSeconds,
+        [int]$PollIntervalMs = $script:SvrScmPollIntervalMs
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-SvrServiceRegisteredInScm -ServiceName $ServiceName)) {
+            return
+        }
+
+        Start-Sleep -Milliseconds $PollIntervalMs
+    }
+
+    throw "Service '$ServiceName' is still registered in SCM after ${TimeoutSeconds}s (may be marked for delete)."
+}
+
+function Test-SvrScMarkedForDeleteFailure {
+    param(
+        [int]$ExitCode,
+        [string]$Output = ""
+    )
+
+    if ($ExitCode -eq 1072) {
+        return $true
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        return $false
+    }
+
+    return ($Output -match '1072|MARKED_FOR_DELETE')
+}
+
+function Get-SvrKernelCalloutDriverCreateArgument {
+    param(
+        [Parameter(Mandatory = $true)][string]$SysPath
+    )
+
+    return "create $($script:SvrDriverServiceName) type= kernel start= demand binPath= `"$SysPath`" DisplayName= `"VPN Route WFP callout`""
+}
+
+function Invoke-SvrScCreateKernelCalloutDriver {
+    param(
+        [Parameter(Mandatory = $true)][string]$SysPath,
+        [int]$MaxAttempts = $script:SvrScmCreateRetryAttempts
+    )
+
+    $full = [System.IO.Path]::GetFullPath($SysPath)
+    $createArgs = Get-SvrKernelCalloutDriverCreateArgument -SysPath $full
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $result = Invoke-SvrSc -ArgumentString $createArgs
+        if ($result.ExitCode -eq 0) {
+            return
+        }
+
+        if (-not (Test-SvrScMarkedForDeleteFailure -ExitCode $result.ExitCode -Output $result.Output)) {
+            throw "sc.exe $createArgs failed (exit $($result.ExitCode)): $($result.Output)"
+        }
+
+        Write-SvrUpdateLogLine "runtime-repair: sc create returned 1072 (marked for delete); waiting for SCM absence (attempt $attempt/$MaxAttempts)"
+        Wait-SvrScmServiceAbsent -ServiceName $script:SvrDriverServiceName
+    }
+
+    throw "sc.exe create failed with ERROR_SERVICE_MARKED_FOR_DELETE (1072) after $MaxAttempts attempts."
+}
+
 function Set-SvrKernelDriverBinPath {
     param(
         [Parameter(Mandatory = $true)][string]$SysPath
@@ -257,9 +350,12 @@ function Set-SvrKernelDriverBinPath {
 
     Write-SvrUpdateLogLine "runtime-repair: recreating kernel service binPath= `"$full`""
     Invoke-SvrSc -ArgumentString "stop $($script:SvrDriverServiceName)" -IgnoreErrors | Out-Null
-    Start-Sleep -Milliseconds 400
-    Invoke-SvrSc -ArgumentString "delete $($script:SvrDriverServiceName)" -IgnoreErrors | Out-Null
-    Invoke-SvrSc -ArgumentString "create $($script:SvrDriverServiceName) type= kernel start= demand binPath= `"$full`" DisplayName= `"VPN Route WFP callout`"" | Out-Null
+    if (Test-SvrServiceRegisteredInScm -ServiceName $script:SvrDriverServiceName) {
+        Invoke-SvrSc -ArgumentString "delete $($script:SvrDriverServiceName)" -IgnoreErrors | Out-Null
+        Wait-SvrScmServiceAbsent -ServiceName $script:SvrDriverServiceName
+    }
+
+    Invoke-SvrScCreateKernelCalloutDriver -SysPath $full
 }
 
 function Stop-SvrWindowsServiceForPublish {
@@ -464,16 +560,53 @@ function Repair-SvrPublishRuntimeImagePaths {
         }
     }
 
-    $driver = Get-Service -Name $script:SvrDriverServiceName -ErrorAction SilentlyContinue
-    if ($driver -and (Test-Path -LiteralPath $driverSys)) {
-        $currentDriver = ConvertFrom-SvrKernelImagePath -ImagePath (
-            Get-SvrServiceImagePathFromRegistry -ServiceName $script:SvrDriverServiceName
-        )
-        $expectedDriver = ConvertFrom-SvrKernelImagePath -ImagePath $driverSys
-        if ($currentDriver -and $expectedDriver -and -not ($currentDriver.Equals($expectedDriver, [StringComparison]::OrdinalIgnoreCase))) {
-            Set-SvrKernelDriverBinPath -SysPath $expectedDriver
+    Repair-SvrPublishCalloutDriverRegistration -PublishDir $PublishDir -Snapshot $Snapshot
+}
+
+function Repair-SvrPublishCalloutDriverRegistration {
+    param(
+        [Parameter(Mandatory = $true)][string]$PublishDir,
+        $Snapshot = $null,
+        [switch]$RequirePublishedSys
+    )
+
+    $driverSys = Join-Path $PublishDir "driver\SelectiveVpnCallout.sys"
+    if (-not (Test-Path -LiteralPath $driverSys)) {
+        if ($RequirePublishedSys) {
+            throw "Published SelectiveVpnCallout.sys is missing; cannot start VPN Route Service ($driverSys)."
         }
+
+        return
     }
+
+    $expectedDriver = ConvertFrom-SvrKernelImagePath -ImagePath $driverSys
+    $driver = Get-Service -Name $script:SvrDriverServiceName -ErrorAction SilentlyContinue
+
+    $repairDriverToPublish = $true
+    if ($Snapshot) {
+        $repairDriverToPublish = Test-SvrShouldRepairDriverImagePathToPublishLayout -Snapshot $Snapshot -PublishDir $PublishDir
+    }
+
+    if (-not $driver) {
+        Write-SvrUpdateLogLine "runtime-repair: registering missing SelectiveVpnCallout at publish path"
+        Invoke-SvrScCreateKernelCalloutDriver -SysPath $expectedDriver
+        return
+    }
+
+    if (-not $repairDriverToPublish) {
+        Write-SvrUpdateLogLine "runtime-repair: keeping callout registered outside publish tree"
+        return
+    }
+
+    $currentDriver = ConvertFrom-SvrKernelImagePath -ImagePath (
+        Get-SvrServiceImagePathFromRegistry -ServiceName $script:SvrDriverServiceName
+    )
+    if ($currentDriver -and $expectedDriver -and $currentDriver.Equals($expectedDriver, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-SvrUpdateLogLine "runtime-repair: callout ImagePath already canonical"
+        return
+    }
+
+    Set-SvrKernelDriverBinPath -SysPath $expectedDriver
 }
 
 function Restore-SvrPublishRuntimeFromSnapshot {
@@ -484,6 +617,10 @@ function Restore-SvrPublishRuntimeFromSnapshot {
 
     $startDriver = $Snapshot.DriverInstalled -and $Snapshot.DriverWasRunning
     $startProduct = $Snapshot.ProductInstalled -and $Snapshot.ProductWasRunning
+
+    if ($startProduct) {
+        Repair-SvrPublishCalloutDriverRegistration -PublishDir $PublishDir -Snapshot $Snapshot -RequirePublishedSys
+    }
 
     if ($startDriver) {
         Start-SvrWindowsServiceForPublish -ServiceName $script:SvrDriverServiceName

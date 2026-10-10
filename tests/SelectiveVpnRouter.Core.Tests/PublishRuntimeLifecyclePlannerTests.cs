@@ -30,6 +30,7 @@ public class PublishRuntimeLifecyclePlannerTests
 
         Assert.False(plan.StartDriver);
         Assert.True(plan.StartProduct);
+        Assert.True(plan.EnsureCalloutRegistrationBeforeProductStart);
         Assert.False(PublishRuntimeLifecyclePlanner.ShouldStopDriverForPublishSwap(snap, PublishRoot));
     }
 

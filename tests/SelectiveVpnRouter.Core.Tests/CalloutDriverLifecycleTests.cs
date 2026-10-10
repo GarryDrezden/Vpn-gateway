@@ -98,6 +98,46 @@ public sealed class CalloutDriverLifecycleTests
     }
 
     [Fact]
+    public void Service_missing_1060_is_recognized_without_escaping_lifecycle()
+    {
+        var missing = new InvalidOperationException("Service 'SelectiveVpnCallout' was not found on computer '.'.");
+        Assert.True(CalloutDriverLifecycle.IsServiceMissingException(missing));
+        Assert.True(CalloutDriverLifecycle.IsServiceMissingException(
+            new System.ComponentModel.Win32Exception(CalloutDriverLifecycle.ErrorServiceDoesNotExist)));
+        Assert.False(CalloutDriverLifecycle.IsServiceMissingException(new InvalidOperationException("already running")));
+
+        CalloutDriverLifecycle.EnsureResult missingResult = CalloutDriverLifecycle.MissingDriverServiceResult();
+        Assert.False(missingResult.ServiceRunning);
+        Assert.False(missingResult.DeviceOpenable);
+        Assert.True(
+            missingResult.Error is "driver-service-not-registered"
+                or "SelectiveVpnCallout.sys not found; driver is not installed.");
+    }
+
+    [Fact]
+    public void Lifecycle_handles_lazy_service_controller_missing_registration()
+    {
+        string repo = FindRepoRoot()!;
+        string lifecycle = File.ReadAllText(Path.Combine(repo, "src", "SelectiveVpnRouter.Network", "CalloutDriverLifecycle.cs"));
+        Assert.Contains("TryGetServiceStatus", lifecycle, StringComparison.Ordinal);
+        Assert.Contains("driver-service-not-registered", lifecycle, StringComparison.Ordinal);
+        Assert.Contains("IsServiceMissingException", lifecycle, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryOpenServiceController", lifecycle, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RouterEngine_fail_soft_when_driver_service_missing()
+    {
+        string repo = FindRepoRoot()!;
+        string engine = File.ReadAllText(Path.Combine(repo, "src", "SelectiveVpnRouter.Service", "RouterEngine.cs"));
+        int start = engine.IndexOf("public void EnsureApplicationRoutingDriver()", StringComparison.Ordinal);
+        string body = engine[start..(start + 500)];
+        Assert.Contains("if (!ensure.ServiceRunning)", body, StringComparison.Ordinal);
+        Assert.Contains("_driverLoadError = ensure.Error", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("throw", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Lifecycle_does_not_parse_sc_query_output_for_authoritative_state()
     {
         string repo = FindRepoRoot()!;

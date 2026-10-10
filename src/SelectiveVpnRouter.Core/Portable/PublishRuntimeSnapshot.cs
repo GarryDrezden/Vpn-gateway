@@ -10,4 +10,5 @@ public sealed record PublishRuntimeSnapshot(
 
 public sealed record PublishRuntimeRestorePlan(
     bool StartDriver,
-    bool StartProduct);
+    bool StartProduct,
+    bool EnsureCalloutRegistrationBeforeProductStart);
