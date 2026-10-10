@@ -148,14 +148,44 @@ public sealed class BrowserRoutingEventsPipeTests : IAsyncLifetime
         using var dir = new TempDir();
         var notifier = new BrowserRoutingChangeNotifier();
         var store = new BrowserRoutingStateStore(dir.File("state.json"), changeNotifier: notifier);
+        var gate = new object();
         var events = new List<BrowserRoutingChangeNotifier.ChangeEvent>();
-        using var _ = notifier.Subscribe(events.Add);
+        using var _ = notifier.Subscribe(evt =>
+        {
+            lock (gate)
+            {
+                events.Add(evt);
+            }
+        });
         store.Load();
         store.UpsertRule(0, Rules.Make(1));
         store.UpsertRule(1, Rules.Make(2));
         store.DeleteRule(2, store.Current!.State.Rules[0].Id);
-        await Task.Delay(100);
-        Assert.Equal([1L, 2L, 3L], events.Select(e => e.Revision).ToArray());
+        await WaitForEventCountAsync(() =>
+        {
+            lock (gate)
+            {
+                return events.Count;
+            }
+        }, expected: 3, timeout: TimeSpan.FromSeconds(2));
+        long[] revisions;
+        lock (gate)
+        {
+            revisions = events.Select(e => e.Revision).ToArray();
+        }
+        Assert.Equal([1L, 2L, 3L], revisions);
+    }
+
+    private static async Task WaitForEventCountAsync(Func<int> count, int expected, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (count() >= expected)
+                return;
+            await Task.Delay(10);
+        }
+        Assert.Fail($"Expected {expected} events, got {count()}.");
     }
 
     [Fact]

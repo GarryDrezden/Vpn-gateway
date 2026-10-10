@@ -1,3 +1,5 @@
+using System.Threading.Channels;
+
 namespace SelectiveVpnRouter.Core.BrowserRouting;
 
 /// <summary>Lightweight in-process notifications after committed browser-routing mutations.</summary>
@@ -10,6 +12,13 @@ public sealed class BrowserRoutingChangeNotifier
 
     private readonly object _lock = new();
     private readonly List<Action<ChangeEvent>> _subscribers = [];
+    private readonly Channel<ChangeEvent> _queue = Channel.CreateUnbounded<ChangeEvent>(
+        new UnboundedChannelOptions { SingleReader = true, AllowSynchronousContinuations = false });
+
+    public BrowserRoutingChangeNotifier()
+    {
+        _ = Task.Run(DispatchLoopAsync);
+    }
 
     public void PublishCommitted(string stateGeneration, long revision)
     {
@@ -33,19 +42,30 @@ public sealed class BrowserRoutingChangeNotifier
 
     private void Publish(ChangeEvent evt)
     {
-        Action<ChangeEvent>[] copy;
-        lock (_lock)
+        _queue.Writer.TryWrite(evt);
+    }
+
+    private async Task DispatchLoopAsync()
+    {
+        try
         {
-            copy = _subscribers.ToArray();
-        }
-        _ = Task.Run(() =>
-        {
-            foreach (var sub in copy)
+            await foreach (ChangeEvent evt in _queue.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                try { sub(evt); }
-                catch { /* subscriber fault must not break store */ }
+                Action<ChangeEvent>[] copy;
+                lock (_lock)
+                {
+                    copy = _subscribers.ToArray();
+                }
+                foreach (var sub in copy)
+                {
+                    try { sub(evt); }
+                    catch { /* subscriber fault must not break store */ }
+                }
             }
-        });
+        }
+        catch (ChannelClosedException)
+        {
+        }
     }
 
     private void Unsubscribe(Action<ChangeEvent> handler)
