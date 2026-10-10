@@ -17,7 +17,7 @@ public static partial class BrowserRoutingUserRuleBuilder
     public static BuildResult TryBuild(
         string? existingId,
         string name,
-        string hostInput,
+        string hostsInput,
         string matchType,
         string routeMode,
         bool enabled,
@@ -25,7 +25,7 @@ public static partial class BrowserRoutingUserRuleBuilder
     {
         string id = string.IsNullOrWhiteSpace(existingId) ? GenerateRuleId() : existingId.Trim();
         if (BrowserRoutingValidator.ValidateRule(
-                new BrowserRoutingRule(id, "a", "example.com", BrowserRoutingContract.ExactHost,
+                new BrowserRoutingRule(id, "a", ["example.com"], BrowserRoutingContract.ExactHost,
                     BrowserRoutingContract.RouteDirect, true, BrowserRoutingContract.SourceUser, null),
                 "/rule").Any(i => i.Path == "/rule/id"))
             return new BuildResult(false, null, "Некорректный идентификатор правила.", "id");
@@ -36,7 +36,7 @@ public static partial class BrowserRoutingUserRuleBuilder
         if (string.IsNullOrWhiteSpace(name))
             return new BuildResult(false, null, "Укажите название правила.", "name");
 
-        if (!BrowserRoutingHostInput.TryNormalize(hostInput, out string? host, out string? hostMessage))
+        if (!BrowserRoutingHostInput.TryNormalizeMultiline(hostsInput, out IReadOnlyList<string>? hosts, out string? hostMessage))
             return new BuildResult(false, null, hostMessage ?? "Укажите корректный домен.", "host");
 
         if (!BrowserRoutingContract.MatchTypes.Contains(matchType))
@@ -49,7 +49,7 @@ public static partial class BrowserRoutingUserRuleBuilder
         var candidate = new BrowserRoutingRule(
             id,
             name.Trim(),
-            host!,
+            hosts!,
             matchType,
             routeMode,
             enabled,
@@ -121,6 +121,48 @@ public static class BrowserRoutingHostInput
             return false;
         }
 
+        return true;
+    }
+
+    public static bool TryNormalizeMultiline(string? raw, out IReadOnlyList<string>? hosts, out string? userMessage)
+    {
+        hosts = null;
+        userMessage = null;
+        if (raw is null)
+        {
+            userMessage = "Укажите домен.";
+            return false;
+        }
+
+        var lines = raw.Split(['\r', '\n', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 0)
+        {
+            userMessage = "Укажите хотя бы один домен.";
+            return false;
+        }
+
+        var list = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+            if (!TryNormalize(line, out string? host, out string? lineMessage))
+            {
+                userMessage = lineMessage ?? "Укажите корректный домен.";
+                return false;
+            }
+            if (seen.Add(host!))
+                list.Add(host!);
+        }
+
+        if (list.Count == 0)
+        {
+            userMessage = "Укажите хотя бы один домен.";
+            return false;
+        }
+
+        hosts = list;
         return true;
     }
 }

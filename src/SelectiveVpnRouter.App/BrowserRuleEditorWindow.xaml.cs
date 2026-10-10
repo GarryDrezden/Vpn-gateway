@@ -41,7 +41,7 @@ public partial class BrowserRuleEditorWindow : Window
         else
         {
             NameBox.Text = existing.Name;
-            HostBox.Text = existing.Host;
+            HostBox.Text = string.Join(Environment.NewLine, existing.Hosts);
             MatchTypeBox.SelectedValue = existing.MatchType;
             RouteBox.SelectedValue = existing.RouteMode;
             EnabledBox.IsChecked = existing.Enabled;

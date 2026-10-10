@@ -7,11 +7,11 @@ namespace SelectiveVpnRouter.BrowserRouting.Tests;
 public class BrowserRoutingWriteApiTests
 {
     private static BrowserRoutingRule IpifyRule => new(
-        "ipify", "IPify", "api.ipify.org", BrowserRoutingContract.ExactHost,
+        "ipify", "IPify", ["api.ipify.org"], BrowserRoutingContract.ExactHost,
         BrowserRoutingContract.RouteVpn, true, BrowserRoutingContract.SourceUser, null);
 
     private static BrowserRoutingRule ExampleDirect => new(
-        "ex", "Example", "example.com", BrowserRoutingContract.ExactHost,
+        "ex", "Example", ["example.com"], BrowserRoutingContract.ExactHost,
         BrowserRoutingContract.RouteDirect, true, BrowserRoutingContract.SourceUser, null);
 
     private static (BrowserRoutingStateStore Store, BrowserRoutingIpcDispatcher Dispatcher) Live()
@@ -161,7 +161,7 @@ public class BrowserRoutingWriteApiTests
     public void Upsert_round_trips_match_and_route_modes(string matchType, string routeMode)
     {
         var (store, dispatcher) = Live();
-        var rule = new BrowserRoutingRule("r1", "R1", "host.example.com", matchType, routeMode, false,
+        var rule = new BrowserRoutingRule("r1", "R1", ["host.example.com"], matchType, routeMode, false,
             BrowserRoutingContract.SourceUser, "note");
         Assert.Null(Ipc.ErrorCode(dispatcher.Dispatch(Ipc.UpsertRule(0, RuleJson(rule))).Response));
         var saved = store.Current!.State.Rules.Single();
@@ -204,7 +204,7 @@ public class BrowserRoutingWriteApiTests
     {
         id = rule.Id,
         name = rule.Name,
-        host = rule.Host,
+        hosts = rule.Hosts,
         matchType = rule.MatchType,
         routeMode = rule.RouteMode,
         enabled = rule.Enabled,

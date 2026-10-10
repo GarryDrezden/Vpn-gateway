@@ -49,7 +49,7 @@ public class StateStoreTests
     [InlineData("")]
     [InlineData("[]")]
     [InlineData("{\"documentType\":\"VpnRoute.BrowserRoutingState\",\"documentVersion\":1,\"stateGeneration\":\"bad\",\"schemaVersion\":1,\"revision\":0,\"defaultRoute\":\"Direct\",\"rules\":[]}")]
-    [InlineData("{\"documentType\":\"VpnRoute.BrowserRoutingState\",\"documentVersion\":1,\"stateGeneration\":\"9b2f6c1e-1d2a-4f57-9a43-3f2a9d7c1b10\",\"schemaVersion\":1,\"revision\":0,\"defaultRoute\":\"Direct\",\"rules\":[{\"id\":\"a\",\"name\":\"A\",\"host\":\"Example.com\",\"matchType\":\"ExactHost\",\"routeMode\":\"VPN\",\"enabled\":true,\"source\":\"User\",\"notes\":null}]}")]
+    [InlineData("{\"documentType\":\"VpnRoute.BrowserRoutingState\",\"documentVersion\":1,\"stateGeneration\":\"9b2f6c1e-1d2a-4f57-9a43-3f2a9d7c1b10\",\"schemaVersion\":1,\"revision\":0,\"defaultRoute\":\"Direct\",\"rules\":[{\"id\":\"a\",\"name\":\"A\",\"host\":\"NOT A HOST!!!\",\"matchType\":\"ExactHost\",\"routeMode\":\"VPN\",\"enabled\":true,\"source\":\"User\",\"notes\":null}]}")]
     [InlineData("{\"documentType\":\"VpnRoute.BrowserRoutingState\",\"documentVersion\":1,\"stateGeneration\":\"9b2f6c1e-1d2a-4f57-9a43-3f2a9d7c1b10\",\"schemaVersion\":1,\"revision\":0,\"defaultRoute\":\"Direct\",\"rules\":[],\"extra\":1}")]
     public void Corrupt_file_makes_state_unavailable_and_is_not_rewritten(string content)
     {

@@ -24,6 +24,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
     private WfpSession? _wfp;
     private WfpPolicyDiagnostics _wfpPolicy = WfpPolicyDiagnostics.Empty;
     private CalloutDriverClient? _driver;
+    private string? _driverLoadError;
     private CancellationTokenSource? _loopCts;
     private readonly OwnedCancellationTokenSource _serviceCts = new();
     private AsyncDisposeGate _disposeGate;
@@ -42,6 +43,38 @@ public sealed partial class RouterEngine : IAsyncDisposable
     }
 
     public CancellationToken ServiceCancellationToken => _serviceCts.Token;
+
+    /// <summary>Service-owned callout init (idempotent). Does not require VPN connect or GUI.</summary>
+    public void EnsureApplicationRoutingDriver()
+    {
+        lock (_gate)
+        {
+            if (_driver?.IsLoaded == true)
+            {
+                _driverLoadError = null;
+                return;
+            }
+
+            CalloutDriverLifecycle.EnsureResult ensure = CalloutDriverLifecycle.EnsureServiceRunning();
+            if (!ensure.ServiceRunning)
+            {
+                _driverLoadError = ensure.Error ?? "Callout driver service is not running.";
+                return;
+            }
+
+            _driver?.Dispose();
+            _driver = CalloutDriverClient.TryOpen();
+            if (_driver.IsLoaded)
+            {
+                _driverLoadError = null;
+                Log("callout-driver-ready device=" + CalloutDriverClient.DevicePath);
+                return;
+            }
+
+            _driverLoadError = ensure.Error ?? "Callout driver device is not open (" + CalloutDriverClient.DevicePath + ").";
+            Log("callout-driver-unavailable " + _driverLoadError);
+        }
+    }
 
     public void Load()
     {
@@ -83,6 +116,8 @@ public sealed partial class RouterEngine : IAsyncDisposable
         {
             RoutingPaused = _paused,
             DriverLoaded = _driver?.IsLoaded == true,
+            DriverExpected = DriverEnvironment.FindSys() is not null,
+            DriverLoadError = _driver?.IsLoaded == true ? null : _driverLoadError,
             VpnRoutingReady = routingReady,
             ProxyPort = proxy?.Port,
             TransparentRedirectActive = _driver?.IsLoaded == true && !_paused && routingReady
@@ -183,8 +218,8 @@ public sealed partial class RouterEngine : IAsyncDisposable
             await _proxy.StartAsync(IPAddress.Loopback, 0, _serviceCts.Token).ConfigureAwait(false);
             Log("proxy-started port=" + _proxy.Port);
 
-            _driver = CalloutDriverClient.TryOpen();
-            if (_driver.IsLoaded)
+            EnsureApplicationRoutingDriver();
+            if (_driver?.IsLoaded == true)
             {
                 _driver.TrySetRedirectTarget(Environment.ProcessId, (ushort)_proxy.Port, out string err);
                 if (err.Length > 0)
@@ -200,7 +235,7 @@ public sealed partial class RouterEngine : IAsyncDisposable
             _wfp = new WfpSession();
             try
             {
-                _wfp.Open(_driver.IsLoaded);
+                _wfp.Open(_driver?.IsLoaded == true);
             }
             catch (Exception ex)
             {
@@ -229,8 +264,6 @@ public sealed partial class RouterEngine : IAsyncDisposable
         _loopCts?.Cancel();
         _loopCts = null;
         try { _driver?.TryDisable(out _); } catch (Exception) { }
-        _driver?.Dispose();
-        _driver = null;
         _wfp?.Dispose();
         _wfp = null;
         if (_proxy is not null)
@@ -375,6 +408,8 @@ public sealed partial class RouterEngine : IAsyncDisposable
         try
         {
             await DisconnectAsync().ConfigureAwait(false);
+            _driver?.Dispose();
+            _driver = null;
             _serviceCts.Dispose();
             Log("RouterEngine.DisposeAsync complete pid=" + Environment.ProcessId);
         }

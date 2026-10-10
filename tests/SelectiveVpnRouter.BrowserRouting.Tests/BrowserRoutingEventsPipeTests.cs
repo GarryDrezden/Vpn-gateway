@@ -181,7 +181,7 @@ public sealed class BrowserRoutingEventsPipeTests : IAsyncLifetime
     {
         id = rule.Id,
         name = rule.Name,
-        host = rule.Host,
+        hosts = rule.Hosts,
         matchType = rule.MatchType,
         routeMode = rule.RouteMode,
         enabled = rule.Enabled,

@@ -25,6 +25,7 @@ public sealed class PipeIpcHost : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _engine.Load();
+        _engine.EnsureApplicationRoutingDriver();
         while (!stoppingToken.IsCancellationRequested)
         {
             NamedPipeServerStream pipe = CreatePipe();

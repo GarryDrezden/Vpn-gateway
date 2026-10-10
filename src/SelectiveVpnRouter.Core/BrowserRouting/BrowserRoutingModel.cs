@@ -29,15 +29,45 @@ public static class BrowserRoutingContract
     public static readonly IReadOnlyList<string> RuleSources = [SourceUser, SourceSystem];
 }
 
-public sealed record BrowserRoutingRule(
+public record BrowserRoutingRule(
     string Id,
     string Name,
-    string Host,
+    IReadOnlyList<string> Hosts,
     string MatchType,
     string RouteMode,
     bool Enabled,
     string Source,
-    string? Notes);
+    string? Notes)
+{
+    /// <summary>First canonical host; mirrors <c>hosts[0]</c> in JSON for backward compatibility.</summary>
+    public string Host => Hosts[0];
+
+    public virtual bool Equals(BrowserRoutingRule? other) =>
+        other is not null
+        && string.Equals(Id, other.Id, StringComparison.Ordinal)
+        && string.Equals(Name, other.Name, StringComparison.Ordinal)
+        && string.Equals(MatchType, other.MatchType, StringComparison.Ordinal)
+        && string.Equals(RouteMode, other.RouteMode, StringComparison.Ordinal)
+        && Enabled == other.Enabled
+        && string.Equals(Source, other.Source, StringComparison.Ordinal)
+        && string.Equals(Notes, other.Notes, StringComparison.Ordinal)
+        && Hosts.SequenceEqual(other.Hosts);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Id, StringComparer.Ordinal);
+        hash.Add(Name, StringComparer.Ordinal);
+        foreach (var host in Hosts)
+            hash.Add(host, StringComparer.Ordinal);
+        hash.Add(MatchType, StringComparer.Ordinal);
+        hash.Add(RouteMode, StringComparer.Ordinal);
+        hash.Add(Enabled);
+        hash.Add(Source, StringComparer.Ordinal);
+        hash.Add(Notes);
+        return hash.ToHashCode();
+    }
+}
 
 /// <summary>
 /// Authoritative browser routing state. <see cref="StateGeneration"/> identifies the lineage

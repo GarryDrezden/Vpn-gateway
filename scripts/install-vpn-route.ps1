@@ -107,12 +107,7 @@ try {
         Add-VpnRouteInstallStep -Label 'service' -Outcome PASS -Detail $svc.Status.ToString()
     }
 
-    $registerScript = Join-Path $extensionRoot 'scripts\native-host\register.ps1'
-    Write-VpnRouteInstallLogLine '=== register.ps1 ==='
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $registerScript -Target Chrome
-    if ($LASTEXITCODE -ne 0) {
-        Write-VpnRouteInstallFailure -Phase 'native host register' -Message 'register.ps1 failed after Service update succeeded.'
-    }
+    Invoke-VpnRouteDeployStagedNativeHost -ExtensionRoot $extensionRoot -Target Chrome
     Invoke-VpnRouteNativeHostStatus -ExtensionRoot $extensionRoot
 
     $okArt, $dist = Test-VpnRouteExtensionProductionArtifacts -ExtensionRoot $extensionRoot

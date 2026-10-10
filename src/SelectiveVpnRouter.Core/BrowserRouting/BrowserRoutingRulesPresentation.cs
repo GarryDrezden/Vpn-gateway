@@ -40,6 +40,17 @@ public static class BrowserRoutingRulesPresentation
         _ => matchType,
     };
 
+    public static string FormatHostsDisplay(IReadOnlyList<string> hosts)
+    {
+        if (hosts.Count == 0)
+            return "";
+        if (hosts.Count == 1)
+            return hosts[0];
+        var extra = hosts.Count - 1;
+        var suffix = extra == 1 ? "домен" : extra is >= 2 and <= 4 ? "домена" : "доменов";
+        return hosts[0] + " + " + extra + " " + suffix;
+    }
+
     public static string LabelRouteMode(string routeMode) => routeMode switch
     {
         BrowserRoutingContract.RouteVpn => "Через VPN",
@@ -59,7 +70,7 @@ public static class BrowserRoutingRulesPresentation
         {
             query = query.Where(r =>
                 r.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                r.Host.Contains(needle, StringComparison.OrdinalIgnoreCase));
+                r.Hosts.Any(h => h.Contains(needle, StringComparison.OrdinalIgnoreCase)));
         }
 
         query = filter switch

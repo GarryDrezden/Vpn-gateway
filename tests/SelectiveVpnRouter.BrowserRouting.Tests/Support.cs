@@ -40,7 +40,7 @@ internal sealed class TempDir : IDisposable
 internal static class Rules
 {
     public static BrowserRoutingRule Make(int i, string? host = null, string matchType = BrowserRoutingContract.DomainAndSubdomains) =>
-        new($"r{i:D5}", $"Rule {i}", host ?? $"host{i}.example.com", matchType, BrowserRoutingContract.RouteVpn, true,
+        new($"r{i:D5}", $"Rule {i}", [host ?? $"host{i}.example.com"], matchType, BrowserRoutingContract.RouteVpn, true,
             BrowserRoutingContract.SourceUser, null);
 
     public static List<BrowserRoutingRule> Many(int count) => Enumerable.Range(0, count).Select(i => Make(i)).ToList();
@@ -53,7 +53,7 @@ internal static class Rules
         return new BrowserRoutingRule(
             ("w" + i.ToString("D5")).PadRight(64, 'x'),
             new string('\u0416', 120),
-            host,
+            [host],
             BrowserRoutingContract.DomainAndSubdomains,
             BrowserRoutingContract.RouteDirect,
             true,

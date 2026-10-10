@@ -6,7 +6,7 @@ namespace SelectiveVpnRouter.BrowserRouting.Tests;
 public class BrowserRoutingControlIpcTests
 {
     private static BrowserRoutingRule Sample => new(
-        "rule-abc1234567890ab", "Sample", "example.com", BrowserRoutingContract.ExactHost,
+        "rule-abc1234567890ab", "Sample", ["example.com"], BrowserRoutingContract.ExactHost,
         BrowserRoutingContract.RouteVpn, true, BrowserRoutingContract.SourceUser, null);
 
     [Fact]

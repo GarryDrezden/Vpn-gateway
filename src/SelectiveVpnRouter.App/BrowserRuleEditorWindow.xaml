@@ -12,8 +12,8 @@
       <TextBlock x:Name="TitleText" Style="{StaticResource SectionTitleText}" Margin="0,0,0,12"/>
       <TextBlock Text="Название" Style="{StaticResource SecondaryText}"/>
       <TextBox x:Name="NameBox" Margin="0,4,0,8"/>
-      <TextBlock Text="Домен" Style="{StaticResource SecondaryText}"/>
-      <TextBox x:Name="HostBox" Margin="0,4,0,8"/>
+      <TextBlock Text="Домены" Style="{StaticResource SecondaryText}"/>
+      <TextBox x:Name="HostBox" AcceptsReturn="True" Height="72" TextWrapping="Wrap" Margin="0,4,0,8"/>
       <TextBlock Text="Тип совпадения" Style="{StaticResource SecondaryText}"/>
       <ComboBox x:Name="MatchTypeBox" Margin="0,4,0,8"/>
       <TextBlock Text="Маршрут" Style="{StaticResource SecondaryText}"/>

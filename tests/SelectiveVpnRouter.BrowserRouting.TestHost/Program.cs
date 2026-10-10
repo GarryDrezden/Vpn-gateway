@@ -109,7 +109,7 @@ static List<BrowserRoutingRule> Generate(int count)
         list.Add(new BrowserRoutingRule(
             id,
             "E2E rule " + i.ToString(CultureInfo.InvariantCulture) + " \u2014 \u043f\u0440\u0430\u0432\u0438\u043b\u043e",
-            "site" + i.ToString(CultureInfo.InvariantCulture) + ".region" + (i % 50).ToString(CultureInfo.InvariantCulture) + ".e2e-routing.example",
+            ["site" + i.ToString(CultureInfo.InvariantCulture) + ".region" + (i % 50).ToString(CultureInfo.InvariantCulture) + ".e2e-routing.example"],
             exact ? BrowserRoutingContract.ExactHost : BrowserRoutingContract.DomainAndSubdomains,
             modes[i % 3],
             i % 17 != 5,
@@ -130,7 +130,7 @@ static List<BrowserRoutingRule> GenerateWorst(int count)
         list.Add(new BrowserRoutingRule(
             ("w-" + n).PadRight(BrowserRoutingContract.MaxIdLength, 'x'),
             n + new string('\u0416', BrowserRoutingContract.MaxNameLength - n.Length),
-            first + "." + label + "." + label + "." + new string('b', BrowserRoutingContract.MaxHostLength - 3 * 64),
+            [first + "." + label + "." + label + "." + new string('b', BrowserRoutingContract.MaxHostLength - 3 * 64)],
             i % 2 == 0 ? BrowserRoutingContract.DomainAndSubdomains : BrowserRoutingContract.ExactHost,
             i % 2 == 0 ? BrowserRoutingContract.RouteVpn : BrowserRoutingContract.RouteDirect,
             true,

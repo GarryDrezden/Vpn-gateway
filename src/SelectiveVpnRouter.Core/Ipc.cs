@@ -30,6 +30,10 @@ public sealed record ServiceSnapshot
     public bool ServiceAlive { get; init; } = true;
     public bool RoutingPaused { get; init; }
     public bool DriverLoaded { get; init; }
+    /// <summary>True when a callout .sys is present on disk (driver expected for app routing).</summary>
+    public bool DriverExpected { get; init; }
+    /// <summary>Safe user-facing detail when <see cref="DriverLoaded"/> is false but load was attempted.</summary>
+    public string? DriverLoadError { get; init; }
     public bool TransparentRedirectActive { get; init; }
     /// <summary>Full routing pipeline ready (OpenVPN + adapter + owned route + proxy + WFP session).</summary>
     public bool VpnRoutingReady { get; init; }

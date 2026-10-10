@@ -253,10 +253,38 @@ function Test-VpnRouteExtensionProductionArtifacts {
     }
     if (-not $json.key) { return $false, 'production key missing' }
     $hostExe = Join-Path $ExtensionRoot 'dist\native-host\SelectiveVpnRouter.NativeHost.exe'
+    $stagedExe = Join-Path $ExtensionRoot 'dist\native-host-staging\SelectiveVpnRouter.NativeHost.exe'
     if (-not (Test-Path -LiteralPath $hostExe)) {
-        return $false, 'native host exe missing'
+        if (-not (Test-Path -LiteralPath $stagedExe)) {
+            return $false, 'native host exe missing (live and staging)'
+        }
+        return $false, 'native host live exe missing (staging present; deploy not run)'
     }
     return $true, $dist
+}
+
+function Invoke-VpnRouteDeployStagedNativeHost {
+    param(
+        [Parameter(Mandatory = $true)][string]$ExtensionRoot,
+        [ValidateSet('Chrome', 'Chromium', 'All')]
+        [string]$Target = 'Chrome'
+    )
+
+    $deployScript = Join-Path $ExtensionRoot 'scripts\native-host\deploy-staged.ps1'
+    if (-not (Test-Path -LiteralPath $deployScript)) {
+        Write-VpnRouteInstallFailure -Phase 'native host deploy' -Message "Missing $deployScript"
+    }
+    $staged = Join-Path $ExtensionRoot 'dist\native-host-staging\SelectiveVpnRouter.NativeHost.exe'
+    if (-not (Test-Path -LiteralPath $staged)) {
+        Write-VpnRouteInstallFailure -Phase 'native host deploy' -Message 'Staged native host missing; build phase must succeed before mutation.'
+    }
+
+    Write-VpnRouteInstallLogLine '=== deploy-staged.ps1 ==='
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $deployScript -Target $Target
+    if ($LASTEXITCODE -ne 0) {
+        Write-VpnRouteInstallFailure -Phase 'native host deploy' -Message "deploy-staged.ps1 exit $LASTEXITCODE"
+    }
+    Add-VpnRouteInstallStep -Label 'native host deploy' -Outcome PASS -Detail 'staged to live'
 }
 
 function Invoke-VpnRouteNativeHostStatus {

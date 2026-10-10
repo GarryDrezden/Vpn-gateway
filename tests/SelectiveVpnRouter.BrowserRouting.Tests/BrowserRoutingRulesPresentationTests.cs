@@ -6,7 +6,7 @@ namespace SelectiveVpnRouter.BrowserRouting.Tests;
 public class BrowserRoutingRulesPresentationTests
 {
     private static BrowserRoutingRule Rule(string id, string name, string host, string route, bool enabled = true) =>
-        new(id, name, host, BrowserRoutingContract.ExactHost, route, enabled, BrowserRoutingContract.SourceUser, null);
+        new(id, name, [host], BrowserRoutingContract.ExactHost, route, enabled, BrowserRoutingContract.SourceUser, null);
 
     [Fact]
     public void U_match_and_route_labels()
@@ -20,6 +20,13 @@ public class BrowserRoutingRulesPresentationTests
     }
 
     [Fact]
+    public void U_format_hosts_display()
+    {
+        Assert.Equal("a.com + 2 домена",
+            BrowserRoutingRulesPresentation.FormatHostsDisplay(["a.com", "b.com", "c.com"]));
+    }
+
+    [Fact]
     public void V_search_filters_name_and_host()
     {
         var rules = new[]
@@ -30,6 +37,20 @@ public class BrowserRoutingRulesPresentationTests
         var filtered = BrowserRoutingRulesPresentation.FilterRules(rules, "git", BrowserRoutingListFilter.All);
         Assert.Single(filtered);
         Assert.Equal("a", filtered[0].Rule.Id);
+    }
+
+    [Fact]
+    public void V_search_matches_any_host_in_multi_host_rule()
+    {
+        var rules = new[]
+        {
+            Rule("a", "Primary", "visible.com", BrowserRoutingContract.RouteVpn),
+            new("b", "Multi", ["other.com", "needle.example"], BrowserRoutingContract.ExactHost,
+                BrowserRoutingContract.RouteDirect, true, BrowserRoutingContract.SourceUser, null),
+        };
+        var filtered = BrowserRoutingRulesPresentation.FilterRules(rules, "needle", BrowserRoutingListFilter.All);
+        Assert.Single(filtered);
+        Assert.Equal("b", filtered[0].Rule.Id);
     }
 
     [Fact]

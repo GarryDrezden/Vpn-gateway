@@ -345,8 +345,15 @@ public partial class MainWindow : Window
         HomeDirectAdapterText.Text = snap.DirectAdapter?.Name ?? "—";
         HomeVpnAdapterText.Text = vpnConnected ? snap.VpnAdapter?.Name ?? "—" : "—";
         HomeAppsCountText.Text = ApplicationRulesHelper.CountVpnRoutedApplications(_appRules.Select(r => r.ToRule())).ToString();
-        HomeDriverDot.Fill = new SolidColorBrush(snap.DriverLoaded ? Color.FromRgb(0x05, 0x96, 0x69) : Color.FromRgb(0x9C, 0xA3, 0xAF));
-        HomeDriverText.Text = snap.DriverLoaded ? "Загружен" : "Не загружен";
+        bool driverOk = snap.DriverLoaded;
+        bool driverError = !driverOk && snap.DriverExpected && !string.IsNullOrWhiteSpace(snap.DriverLoadError);
+        HomeDriverDot.Fill = new SolidColorBrush(driverOk
+            ? Color.FromRgb(0x05, 0x96, 0x69)
+            : driverError ? Color.FromRgb(0xDC, 0x26, 0x26) : Color.FromRgb(0x9C, 0xA3, 0xAF));
+        HomeDriverText.Text = driverOk
+            ? "Загружен"
+            : driverError ? "Ошибка запуска" : "Не загружен";
+        HomeDriverText.ToolTip = driverError ? snap.DriverLoadError : null;
         ConnectVpnButton.Visibility = vpnConnected ? Visibility.Collapsed : Visibility.Visible;
         DisconnectVpnButton.Visibility = vpnConnected ? Visibility.Visible : Visibility.Collapsed;
     }

@@ -15,7 +15,7 @@ public static class AcceptanceSeedRules
         new(
             IpifyRuleId,
             "Acceptance: api.ipify.org VPN",
-            "api.ipify.org",
+            ["api.ipify.org"],
             BrowserRoutingContract.ExactHost,
             BrowserRoutingContract.RouteVpn,
             true,
@@ -24,7 +24,7 @@ public static class AcceptanceSeedRules
         new(
             ExampleRuleId,
             "Acceptance: example.com Direct",
-            "example.com",
+            ["example.com"],
             BrowserRoutingContract.ExactHost,
             BrowserRoutingContract.RouteDirect,
             true,

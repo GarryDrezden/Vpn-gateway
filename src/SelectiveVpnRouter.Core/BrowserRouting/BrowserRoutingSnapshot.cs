@@ -77,6 +77,10 @@ public sealed class BrowserRoutingSnapshot
         writer.WriteStartObject();
         writer.WriteString("id", rule.Id);
         writer.WriteString("name", rule.Name);
+        writer.WriteStartArray("hosts");
+        foreach (var host in rule.Hosts)
+            writer.WriteStringValue(host);
+        writer.WriteEndArray();
         writer.WriteString("host", rule.Host);
         writer.WriteString("matchType", rule.MatchType);
         writer.WriteString("routeMode", rule.RouteMode);

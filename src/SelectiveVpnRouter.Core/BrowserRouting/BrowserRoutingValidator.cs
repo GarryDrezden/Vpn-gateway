@@ -37,8 +37,9 @@ public static class BrowserRoutingValidator
     }
 
     private static readonly string[] StateFields = ["schemaVersion", "revision", "defaultRoute", "rules"];
-    private static readonly string[] RuleRequiredFields = ["id", "name", "host", "matchType", "routeMode", "enabled", "source"];
-    private static readonly HashSet<string> RuleFields = new([.. RuleRequiredFields, "notes"], StringComparer.Ordinal);
+    private static readonly string[] RuleRequiredFields = ["id", "name", "matchType", "routeMode", "enabled", "source"];
+    private static readonly HashSet<string> RuleFields =
+        new([.. RuleRequiredFields, "hosts", "host", "notes"], StringComparer.Ordinal);
 
     private static readonly IdnMapping Idn = new() { AllowUnassigned = false, UseStd3AsciiRules = false };
 
@@ -99,8 +100,13 @@ public static class BrowserRoutingValidator
             issues.Add(new(Codes.InvalidId, path + "/id"));
         if (!IsValidName(rule.Name))
             issues.Add(new(Codes.InvalidName, path + "/name"));
-        if (!IsCanonicalHost(rule.Host))
-            issues.Add(new(Codes.InvalidHost, path + "/host"));
+        if (rule.Hosts.Count == 0)
+            issues.Add(new(Codes.InvalidHost, path + "/hosts"));
+        for (var i = 0; i < rule.Hosts.Count; i++)
+        {
+            if (!IsCanonicalHost(rule.Hosts[i]))
+                issues.Add(new(Codes.InvalidHost, path + "/hosts/" + i.ToString(CultureInfo.InvariantCulture)));
+        }
         if (!BrowserRoutingContract.MatchTypes.Contains(rule.MatchType))
             issues.Add(new(Codes.UnknownMatchType, path + "/matchType"));
         if (!BrowserRoutingContract.RouteModes.Contains(rule.RouteMode))
@@ -134,8 +140,11 @@ public static class BrowserRoutingValidator
                 issues.Add(new(Codes.DuplicateRuleId, rulePath + "/id"));
             if (ruleIssues.Count > 0 || !rule.Enabled)
                 continue;
-            var key = (rule.MatchType, rule.Host);
-            active[key] = active.TryGetValue(key, out var count) ? count + 1 : 1;
+            foreach (var host in rule.Hosts)
+            {
+                var key = (rule.MatchType, host);
+                active[key] = active.TryGetValue(key, out var count) ? count + 1 : 1;
+            }
         }
 
         foreach (var (_, count) in active.OrderBy(entry => entry.Key))
@@ -251,6 +260,11 @@ public static class BrowserRoutingValidator
                 issues.Add(new(Codes.MissingField, path + "/" + required));
         }
 
+        var hasLegacyHost = fields.ContainsKey("host");
+        var hasHosts = fields.ContainsKey("hosts");
+        if (!hasLegacyHost && !hasHosts)
+            issues.Add(new(Codes.MissingField, path + "/hosts"));
+
         string? Str(string field, string code)
         {
             if (!fields.TryGetValue(field, out var value))
@@ -263,10 +277,28 @@ public static class BrowserRoutingValidator
 
         var id = Str("id", Codes.InvalidId);
         var name = Str("name", Codes.InvalidName);
-        var host = Str("host", Codes.InvalidHost);
         var matchType = Str("matchType", Codes.UnknownMatchType);
         var routeMode = Str("routeMode", Codes.UnknownRouteMode);
         var source = Str("source", Codes.UnknownSource);
+
+        IReadOnlyList<string>? hosts = null;
+        if (hasLegacyHost && !hasHosts)
+        {
+            var legacy = Str("host", Codes.InvalidHost);
+            if (legacy is not null)
+                hosts = TryParseLegacyHostList(legacy, path, issues);
+        }
+        else if (hasHosts && fields.TryGetValue("hosts", out var hostsElement))
+            hosts = TryParseHostsArray(hostsElement, path, issues);
+
+        if (hasLegacyHost && hasHosts && hosts is not null && fields.TryGetValue("host", out var legacyElement) &&
+            legacyElement.ValueKind == JsonValueKind.String)
+        {
+            if (!BrowserRoutingHostInput.TryNormalize(legacyElement.GetString(), out string? legacyHost, out _))
+                issues.Add(new(Codes.InvalidHost, path + "/host"));
+            else if (!string.Equals(legacyHost, hosts[0], StringComparison.Ordinal))
+                issues.Add(new(Codes.InvalidType, path + "/hosts"));
+        }
 
         var enabled = false;
         if (fields.TryGetValue("enabled", out var enabledElement))
@@ -286,11 +318,11 @@ public static class BrowserRoutingValidator
                 issues.Add(new(Codes.InvalidNotes, path + "/notes"));
         }
 
-        if (issues.Count > before || id is null || name is null || host is null ||
+        if (issues.Count > before || id is null || name is null || hosts is null ||
             matchType is null || routeMode is null || source is null)
             return null;
 
-        var rule = new BrowserRoutingRule(id, name, host, matchType, routeMode, enabled, source, notes);
+        var rule = new BrowserRoutingRule(id, name, hosts, matchType, routeMode, enabled, source, notes);
         var ruleIssues = ValidateRule(rule, path);
         if (ruleIssues.Count > 0)
         {
@@ -298,6 +330,54 @@ public static class BrowserRoutingValidator
             return null;
         }
         return rule;
+    }
+
+    private static IReadOnlyList<string>? TryParseLegacyHostList(string host, string path, List<BrowserRoutingIssue> issues)
+    {
+        if (!BrowserRoutingHostInput.TryNormalize(host, out string? normalized, out _))
+        {
+            issues.Add(new(Codes.InvalidHost, path + "/host"));
+            return null;
+        }
+        return [normalized!];
+    }
+
+    private static IReadOnlyList<string>? TryParseHostsArray(JsonElement element, string path, List<BrowserRoutingIssue> issues)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            issues.Add(new(Codes.InvalidType, path + "/hosts"));
+            return null;
+        }
+        if (element.GetArrayLength() == 0)
+        {
+            issues.Add(new(Codes.InvalidHost, path + "/hosts"));
+            return null;
+        }
+
+        var hosts = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var index = 0;
+        foreach (var item in element.EnumerateArray())
+        {
+            var itemPath = path + "/hosts/" + index.ToString(CultureInfo.InvariantCulture);
+            if (item.ValueKind != JsonValueKind.String)
+            {
+                issues.Add(new(Codes.InvalidHost, itemPath));
+                index++;
+                continue;
+            }
+            var host = item.GetString();
+            if (!IsCanonicalHost(host))
+                issues.Add(new(Codes.InvalidHost, itemPath));
+            else if (host is not null && seen.Add(host))
+                hosts.Add(host);
+            index++;
+        }
+
+        if (hosts.Count == 0 && !issues.Any(i => i.Path.StartsWith(path + "/hosts", StringComparison.Ordinal)))
+            issues.Add(new(Codes.InvalidHost, path + "/hosts"));
+        return hosts.Count > 0 ? hosts.ToArray() : null;
     }
 
     private static Dictionary<string, JsonElement> ReadFields(
