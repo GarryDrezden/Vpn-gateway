@@ -206,6 +206,11 @@ try {
 
     Update-VpnRouteDesktopShortcuts -AppExe $appExe -ProductName "VPN Route" -IconPath $iconIco
 
+    $runRoutingFastSmoke = $false
+    if ($script:deployRuntimeSnapshot) {
+        $runRoutingFastSmoke = $script:deployRuntimeSnapshot.ProductInstalled -and $script:deployRuntimeSnapshot.ProductWasRunning
+    }
+
     Invoke-SvrStep -Name "smoke" -PassLabel "smoke" -Action {
         Test-SvrPublishRuntimeLayout -PublishDir $liveDir
 
@@ -215,9 +220,14 @@ try {
         Invoke-SvrCaptureScript -FilePath (Join-Path $PSScriptRoot "smoke-app-publish.ps1") `
             -ArgumentList @("-PublishDir", $liveDir, "-Quiet") | Out-Null
 
-        Write-SvrUpdateLogLine "=== STEP routing-fast ==="
-        Invoke-SvrCaptureScript -FilePath (Join-Path $PSScriptRoot "test-routing-fast.ps1") `
-            -ArgumentList @("-Quiet") -AllowedExitCodes @(0, 2) | Out-Null
+        if ($runRoutingFastSmoke) {
+            Write-SvrUpdateLogLine "=== STEP routing-fast ==="
+            Invoke-SvrCaptureScript -FilePath (Join-Path $PSScriptRoot "test-routing-fast.ps1") `
+                -ArgumentList @("-Quiet") -AllowedExitCodes @(0, 2) | Out-Null
+        }
+        else {
+            Write-SvrUpdateLogLine "routing-fast: SKIP reason: product service was stopped before update and stopped state was preserved"
+        }
     }
 
     Write-SvrUpdateSummary -Success
