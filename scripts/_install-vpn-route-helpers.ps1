@@ -321,9 +321,35 @@ function Invoke-VpnRouteNativeHostStatus {
     Add-VpnRouteInstallStep -Label 'native host registration' -Outcome PASS -Detail $script:VpnRouteProductionHostName
 }
 
+function Invoke-VpnRouteNodeCommand {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ArgumentList
+    )
+
+    $node = (Get-Command node.exe -ErrorAction Stop).Source
+    $stdoutFile = [System.IO.Path]::GetTempFileName()
+    $stderrFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $proc = Start-Process -FilePath $node -ArgumentList $ArgumentList -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+        $stdout = [System.IO.File]::ReadAllText($stdoutFile)
+        $stderr = [System.IO.File]::ReadAllText($stderrFile)
+        return [pscustomobject]@{
+            ExitCode = $proc.ExitCode
+            StdOut   = $stdout
+            StdErr   = $stderr
+            Output   = ($stdout + $stderr).TrimEnd()
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutFile, $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-VpnRouteReadOnlyIntegrationVerify {
     param(
         [Parameter(Mandatory = $true)][string]$ExtensionRoot,
+        $PreUpdateSnapshot = $null,
         [switch]$RequireBrowserRoutingPush
     )
 
@@ -332,20 +358,91 @@ function Invoke-VpnRouteReadOnlyIntegrationVerify {
         Add-VpnRouteInstallStep -Label 'integration verify' -Outcome SKIP -Detail 'script missing'
         return
     }
+
+    if (-not $PreUpdateSnapshot) {
+        Write-VpnRouteInstallLogLine '=== verify-browser-integration-readonly.js ==='
+        Push-Location $ExtensionRoot
+        try {
+            $verifyArgs = @($verify)
+            if ($RequireBrowserRoutingPush) {
+                $verifyArgs += '--require-browser-routing-push'
+            }
+
+            $result = Invoke-VpnRouteNodeCommand -ArgumentList $verifyArgs
+            if ($result.Output) {
+                Write-VpnRouteInstallLogLine $result.Output
+            }
+
+            if ($result.ExitCode -ne 0) {
+                Write-VpnRouteInstallFailure -Phase 'integration verify' -Message 'read-only integration check failed.'
+            }
+
+            $out = $result.Output
+            $api = if ($out -match 'integrationApiVersion:\s*(\S+)') { $Matches[1] } else { 'v1' }
+            Add-VpnRouteInstallStep -Label 'integration verify' -Outcome PASS -Detail $api
+        }
+        finally {
+            Pop-Location
+        }
+
+        return
+    }
+
+    $requireLiveService = $PreUpdateSnapshot.ProductInstalled -and $PreUpdateSnapshot.ProductWasRunning
+    $skipLiveService = $PreUpdateSnapshot.ProductInstalled -and -not $PreUpdateSnapshot.ProductWasRunning
+
+    if ($skipLiveService) {
+        Write-VpnRouteInstallLogLine '=== verify-browser-integration-readonly.js (host-only) ==='
+        Push-Location $ExtensionRoot
+        try {
+            $result = Invoke-VpnRouteNodeCommand -ArgumentList @($verify)
+            if ($result.Output) {
+                Write-VpnRouteInstallLogLine $result.Output
+            }
+
+            if ($result.ExitCode -ne 0) {
+                Write-VpnRouteInstallFailure -Phase 'integration verify' -Message 'read-only host bridge check failed.'
+            }
+
+            Add-VpnRouteInstallStep -Label 'integration API live verify' -Outcome SKIP -Detail 'product service intentionally preserved stopped'
+            Add-VpnRouteInstallStep -Label 'native host bridge' -Outcome PASS -Detail 'read-only verify partial OK'
+        }
+        finally {
+            Pop-Location
+        }
+
+        return
+    }
+
+    if ($requireLiveService) {
+        $svc = Get-Service -Name 'SelectiveVpnRouter' -ErrorAction SilentlyContinue
+        if (-not $svc -or $svc.Status -ne 'Running') {
+            Write-VpnRouteInstallFailure -Phase 'integration verify' -Message 'product service was expected Running after update.'
+        }
+    }
+
     Write-VpnRouteInstallLogLine '=== verify-browser-integration-readonly.js ==='
     Push-Location $ExtensionRoot
     try {
-        $verifyArgs = @($verify)
-        if ($RequireBrowserRoutingPush) {
-            $verifyArgs += '--require-browser-routing-push'
+        $verifyArgs = @($verify, '--require-browser-routing-push', '--require-live-service')
+        $result = Invoke-VpnRouteNodeCommand -ArgumentList $verifyArgs
+        if ($result.Output) {
+            Write-VpnRouteInstallLogLine $result.Output
         }
-        $out = & node @verifyArgs 2>&1 | Out-String
-        Write-VpnRouteInstallLogLine $out
-        if ($LASTEXITCODE -ne 0) {
+
+        if ($result.ExitCode -ne 0) {
             Write-VpnRouteInstallFailure -Phase 'integration verify' -Message 'read-only integration check failed.'
         }
+
+        $out = $result.Output
         $api = if ($out -match 'integrationApiVersion:\s*(\S+)') { $Matches[1] } else { 'v1' }
         Add-VpnRouteInstallStep -Label 'integration API' -Outcome PASS -Detail $api
+        if ($out -match 'browserRoutingPush') {
+            Add-VpnRouteInstallStep -Label 'browser routing push' -Outcome PASS -Detail 'capability present'
+        }
+        else {
+            Write-VpnRouteInstallFailure -Phase 'integration verify' -Message 'browserRoutingPush capability not verified.'
+        }
     }
     finally {
         Pop-Location

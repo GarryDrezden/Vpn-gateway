@@ -92,6 +92,15 @@ try {
     # Build extension stack before mutating installed Service/registration.
     Invoke-VpnRouteExtensionBuildPhase -ExtensionRoot $extensionRoot
 
+    . (Join-Path $PSScriptRoot 'svr-publish-runtime-lifecycle.ps1')
+    $preUpdateRuntimeSnapshot = Get-SvrPublishRuntimeSnapshot
+    Write-VpnRouteInstallLogLine (
+        "pre-update-runtime: product installed=$($preUpdateRuntimeSnapshot.ProductInstalled) wasRunning=$($preUpdateRuntimeSnapshot.ProductWasRunning)"
+    )
+    Write-VpnRouteInstallLogLine (
+        "pre-update-runtime: driver installed=$($preUpdateRuntimeSnapshot.DriverInstalled) wasRunning=$($preUpdateRuntimeSnapshot.DriverWasRunning)"
+    )
+
     Set-VpnRouteInstallMutationStarted
 
     $updateScript = Join-Path $PSScriptRoot 'update-desktop.ps1'
@@ -116,7 +125,7 @@ try {
     }
     Add-VpnRouteInstallStep -Label 'extension build' -Outcome PASS -Detail $script:VpnRouteProductionExtensionId
 
-    Invoke-VpnRouteReadOnlyIntegrationVerify -ExtensionRoot $extensionRoot -RequireBrowserRoutingPush
+    Invoke-VpnRouteReadOnlyIntegrationVerify -ExtensionRoot $extensionRoot -PreUpdateSnapshot $preUpdateRuntimeSnapshot
 
     Write-VpnRouteInstallLogLine "Browser registration: HKCU\Software\Google\Chrome\NativeMessagingHosts\$($script:VpnRouteProductionHostName) (Yandex reads Chrome key per repo acceptance docs)."
     Write-VpnRouteInstallDoneBanner -ExtensionRoot $extensionRoot
