@@ -252,8 +252,19 @@ function Test-VpnRouteExtensionProductionArtifacts {
         if ($perms -notcontains $p) { return $false, "missing permission $p" }
     }
     if (-not $json.key) { return $false, 'production key missing' }
-    $hostExe = Join-Path $ExtensionRoot 'dist\native-host\SelectiveVpnRouter.NativeHost.exe'
     $stagedExe = Join-Path $ExtensionRoot 'dist\native-host-staging\SelectiveVpnRouter.NativeHost.exe'
+    $nmManifest = Join-Path $ExtensionRoot 'dist\native-messaging\com.vpnroute.browser.json'
+    $hostExe = $null
+    if (Test-Path -LiteralPath $nmManifest -PathType Leaf) {
+        try {
+            $nm = Get-Content -LiteralPath $nmManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($nm.path) { $hostExe = [string]$nm.path }
+        }
+        catch { }
+    }
+    if (-not $hostExe) {
+        $hostExe = Join-Path $ExtensionRoot 'dist\native-host\SelectiveVpnRouter.NativeHost.exe'
+    }
     if (-not (Test-Path -LiteralPath $hostExe)) {
         if (-not (Test-Path -LiteralPath $stagedExe)) {
             return $false, 'native host exe missing (live and staging)'
