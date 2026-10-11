@@ -3,28 +3,60 @@
 param(
     [string]$SourcePng,
     [string]$OutputIco,
-    [string]$AppCopyIco,
+    [string]$PreviewPng,
     [int]$CanvasSize = 256,
     [int[]]$Sizes = @(16, 20, 24, 32, 40, 48, 64, 128, 256),
-    [switch]$Quiet
+    [switch]$Quiet,
+    [switch]$SkipIfUpToDate
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "branding-asset-paths.ps1")
+
 Add-Type -AssemblyName System.Drawing
 
-$root = Split-Path $PSScriptRoot -Parent
+$paths = Get-SvrBrandingAssetPaths -RepoRoot (Get-SvrBrandingRepoRoot -FromScriptRoot $PSScriptRoot)
 if (-not $SourcePng) {
-    $SourcePng = Join-Path $root "assets\branding\vpn-route-icon-source.png"
+    $SourcePng = $paths.SourcePng
 }
 if (-not $OutputIco) {
-    $OutputIco = Join-Path $root "assets\branding\vpn-route-icon.ico"
+    $OutputIco = $paths.GeneratedIco
 }
-if (-not $AppCopyIco) {
-    $AppCopyIco = Join-Path $root "src\SelectiveVpnRouter.App\vpn-route-icon.ico"
+if (-not $PreviewPng) {
+    $PreviewPng = Join-Path (Split-Path $OutputIco) "vpn-route-icon-tight-256.png"
 }
 
-if (-not (Test-Path $SourcePng)) {
+foreach ($forbidden in (Get-SvrBrandingForbiddenWritePaths -RepoRoot $paths.RepoRoot)) {
+    $forbiddenFull = $null
+    if (Test-Path -LiteralPath $forbidden) {
+        $forbiddenFull = (Resolve-Path -LiteralPath $forbidden).Path
+    }
+    else {
+        $forbiddenFull = [System.IO.Path]::GetFullPath($forbidden)
+    }
+    foreach ($target in @($OutputIco, $PreviewPng)) {
+        if ([string]::IsNullOrWhiteSpace($target)) { continue }
+        $targetFull = [System.IO.Path]::GetFullPath($target)
+        if ($targetFull -eq $forbiddenFull) {
+            throw "Refusing to write generated icon to tracked path: $target"
+        }
+    }
+}
+
+if (-not (Test-Path -LiteralPath $SourcePng)) {
     throw "Source PNG not found: $SourcePng"
+}
+
+if ($SkipIfUpToDate -and (Test-SvrBrandingGeneratedOutputsCurrent -OutputIco $OutputIco -PreviewPng $PreviewPng -RepoRoot $paths.RepoRoot -SourcePng $SourcePng)) {
+    if ($Quiet) {
+        if (Get-Command Write-SvrUpdateDetail -ErrorAction SilentlyContinue) {
+            Write-SvrUpdateDetail "App icon up to date: $OutputIco"
+        }
+    }
+    else {
+        Write-Host "App icon up to date: $OutputIco"
+    }
+    return
 }
 
 function Test-ContentPixel([System.Drawing.Color]$c) {
@@ -120,8 +152,11 @@ $src = [System.Drawing.Image]::FromFile($SourcePng)
 $tight256 = $null
 try {
     $tight256 = New-TightCanvas $src $CanvasSize
-    $previewPng = Join-Path (Split-Path $OutputIco) "vpn-route-icon-tight-256.png"
-    $tight256.Save($previewPng, [Drawing.Imaging.ImageFormat]::Png)
+    $previewDir = Split-Path $PreviewPng
+    if (-not (Test-Path -LiteralPath $previewDir)) {
+        New-Item -ItemType Directory -Path $previewDir -Force | Out-Null
+    }
+    $tight256.Save($PreviewPng, [Drawing.Imaging.ImageFormat]::Png)
 
     $images = New-Object System.Collections.Generic.List[object]
     foreach ($size in $Sizes) {
@@ -136,9 +171,9 @@ try {
         $images.Add([pscustomobject]@{ Bitmap = $bmp; Data = $pair[0]; Size = $pair[1] })
     }
 
-    $dir = Split-Path $OutputIco
-    if (-not (Test-Path $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $icoDir = Split-Path $OutputIco
+    if (-not (Test-Path -LiteralPath $icoDir)) {
+        New-Item -ItemType Directory -Path $icoDir -Force | Out-Null
     }
 
     $fs = [IO.File]::Create($OutputIco)
@@ -165,12 +200,10 @@ try {
     $fs.Close()
     foreach ($img in $images) { $img.Bitmap.Dispose() }
 
-    Copy-Item -Path $OutputIco -Destination $AppCopyIco -Force
     if ($Quiet) {
         $detail = @(
             "Created $OutputIco",
-            "Copied to $AppCopyIco",
-            "Preview PNG: $previewPng",
+            "Preview PNG: $PreviewPng",
             "ICO sizes: $($Sizes -join ', ')"
         )
         foreach ($line in $detail) {
@@ -184,8 +217,7 @@ try {
     }
     else {
         Write-Host "Created $OutputIco"
-        Write-Host "Copied to $AppCopyIco"
-        Write-Host "Preview PNG: $previewPng"
+        Write-Host "Preview PNG: $PreviewPng"
         Write-Host "ICO sizes: $($Sizes -join ', ')"
     }
 }

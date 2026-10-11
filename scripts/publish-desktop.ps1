@@ -9,20 +9,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "_common.ps1")
+. (Join-Path $PSScriptRoot "branding-asset-paths.ps1")
 
 if ($Quiet) { $global:SvrUpdateQuiet = $true }
 
 $root = Get-SvrRepoRoot
+$branding = Get-SvrBrandingAssetPaths -RepoRoot $root
 $out = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $root "artifacts\publish\SelectiveVpnRouter" }
 $iconScript = Join-Path $PSScriptRoot "generate-app-icon.ps1"
-if (Test-Path $iconScript) {
-    & $iconScript -Quiet:$Quiet
+if (Test-Path -LiteralPath $iconScript) {
+    & $iconScript -SourcePng $branding.SourcePng -OutputIco $branding.GeneratedIco -PreviewPng $branding.PreviewPng -SkipIfUpToDate -Quiet:$Quiet
 }
 
-$ico = Join-Path $root "assets\branding\vpn-route-icon.ico"
-if (-not (Test-Path $ico)) {
-    $ico = Join-Path $root "src\SelectiveVpnRouter.App\vpn-route-icon.ico"
-}
+$ico = $branding.GeneratedIco
 $embed = Join-Path $PSScriptRoot "embed-app-icon.ps1"
 
 if (Test-Path -LiteralPath $out) {
@@ -65,10 +64,14 @@ Ensure-SvrPortableDriverLayout -LayoutRoot $out -RepoRoot $root
 Write-SvrPortableManifestForLayout -LayoutRoot $out -RepoRoot $root
 
 $appExe = Join-Path $out "SelectiveVpnRouter.App.exe"
-if ((Test-Path $embed) -and (Test-Path $ico) -and (Test-Path $appExe)) {
+$publishedSidecar = Join-Path $out "vpn-route-icon.ico"
+if ((Test-Path -LiteralPath $embed) -and (Test-Path -LiteralPath $ico) -and (Test-Path -LiteralPath $appExe)) {
     Write-SvrUpdateDetail "Embedding app icon into publish exe..."
     & $embed -Exe $appExe -Ico $ico -Quiet:$Quiet 2>&1 | ForEach-Object { Write-SvrUpdateDetail "$_" }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+if ((Test-Path -LiteralPath $ico) -and -not (Test-Path -LiteralPath $publishedSidecar)) {
+    Copy-Item -LiteralPath $ico -Destination $publishedSidecar -Force
 }
 
 Write-SvrUpdateDetail "Published to: $out"

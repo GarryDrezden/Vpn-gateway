@@ -5,22 +5,37 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>SelectiveVpnRouter.App</RootNamespace>
-    <ApplicationIcon>vpn-route-icon.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
+    <_BrandingRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))</_BrandingRepoRoot>
+    <_AppIconSource>$(_BrandingRepoRoot)\assets\branding\vpn-route-icon-source.png</_AppIconSource>
+    <_GeneratedAppIcon>$(_BrandingRepoRoot)\artifacts\branding\vpn-route-icon.ico</_GeneratedAppIcon>
+    <_LinkedAppIconPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\vpn-route-icon.ico</_LinkedAppIconPath>
+    <ApplicationIcon>$(_LinkedAppIconPath)</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SelectiveVpnRouter.Core\SelectiveVpnRouter.Core.csproj" />
-    <Resource Include="vpn-route-icon.ico" />
-    <Content Include="vpn-route-icon.ico">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
   </ItemGroup>
-  <Target Name="EmbedAppIcon" AfterTargets="Build;Publish;_CopyResolvedFilesToPublishPreserveNewest" Condition="'$(OutputType)' == 'WinExe' AND Exists('$(MSBuildProjectDirectory)\vpn-route-icon.ico')">
+  <Target Name="EnsureAppIconGenerated" BeforeTargets="PrepareForBuild;PrepareForPublish">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(_BrandingRepoRoot)\scripts\generate-app-icon.ps1&quot; -SourcePng &quot;$(_AppIconSource)&quot; -OutputIco &quot;$(_GeneratedAppIcon)&quot; -SkipIfUpToDate -Quiet" />
+    <Copy SourceFiles="$(_GeneratedAppIcon)" DestinationFiles="$(_LinkedAppIconPath)" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <Content Remove="vpn-route-icon.ico" />
+      <Resource Remove="vpn-route-icon.ico" />
+      <Content Include="$(_LinkedAppIconPath)">
+        <Link>vpn-route-icon.ico</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+      <Resource Include="$(_LinkedAppIconPath)">
+        <Link>vpn-route-icon.ico</Link>
+      </Resource>
+    </ItemGroup>
+  </Target>
+  <Target Name="EmbedAppIcon" AfterTargets="Build;Publish;_CopyResolvedFilesToPublishPreserveNewest" Condition="'$(OutputType)' == 'WinExe' AND Exists('$(_LinkedAppIconPath)')">
     <PropertyGroup>
       <_AppExeForIcon Condition="'$(_AppExeForIcon)' == '' and '$(PublishDir)' != ''">$([System.IO.Path]::Combine('$(PublishDir)', '$(AssemblyName).exe'))</_AppExeForIcon>
       <_AppExeForIcon Condition="'$(_AppExeForIcon)' == ''">$([System.IO.Path]::Combine('$(TargetDir)', '$(AssemblyName).exe'))</_AppExeForIcon>
     </PropertyGroup>
     <Message Importance="high" Text="EmbedAppIcon: $(_AppExeForIcon)" />
-    <Exec Condition="Exists('$(_AppExeForIcon)')" Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\embed-app-icon.ps1&quot; -Exe &quot;$(_AppExeForIcon)&quot; -Ico &quot;$(MSBuildProjectDirectory)\vpn-route-icon.ico&quot;" />
+    <Exec Condition="Exists('$(_AppExeForIcon)')" Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\embed-app-icon.ps1&quot; -Exe &quot;$(_AppExeForIcon)&quot; -Ico &quot;$(_LinkedAppIconPath)&quot;" />
   </Target>
 </Project>

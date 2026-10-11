@@ -5,6 +5,7 @@
 [Ll]ogs/
 *.log
 artifacts/
+# Generated Windows app icons (see assets/branding/README.md): artifacts/branding/
 *.sys
 *.cat
 

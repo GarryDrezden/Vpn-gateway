@@ -196,9 +196,13 @@ try {
         Add-SvrStepResult -Name "service" -Outcome SKIP -Label "service" -Detail "Stopped"
     }
 
-    $iconIco = Join-Path $root "assets\branding\vpn-route-icon.ico"
+    . (Join-Path $PSScriptRoot "branding-asset-paths.ps1")
+    $iconIco = (Get-SvrBrandingAssetPaths -RepoRoot $root).GeneratedIco
     if (-not (Test-Path -LiteralPath $iconIco)) {
-        $iconIco = Join-Path $root "src\SelectiveVpnRouter.App\vpn-route-icon.ico"
+        $genScript = Join-Path $PSScriptRoot "generate-app-icon.ps1"
+        if (Test-Path -LiteralPath $genScript) {
+            & $genScript -SkipIfUpToDate -Quiet
+        }
     }
     if (Test-Path -LiteralPath $iconIco) {
         Copy-Item -LiteralPath $iconIco -Destination (Join-Path $liveDir "vpn-route-icon.ico") -Force
