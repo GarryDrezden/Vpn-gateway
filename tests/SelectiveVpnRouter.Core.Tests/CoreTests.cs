@@ -828,8 +828,9 @@ public class DiagnosticUiExposureTests
     {
         string root = RepoRoot();
         string xaml = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.App", "MainWindow.xaml"));
-        Assert.Contains("x:Name=\"TestCenterScrollViewer\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("OnTestCenterScrollPreviewMouseWheel", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"TestCenterCategoryTabs\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"DiagResultPanel\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"Базовые\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"Маршрутизация\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Header=\"Драйвер и WFP\"", xaml, StringComparison.Ordinal);
@@ -868,10 +869,12 @@ public class DiagnosticUiExposureTests
     {
         string root = RepoRoot();
         string xaml = File.ReadAllText(Path.Combine(root, "src", "SelectiveVpnRouter.App", "MainWindow.xaml"));
-        int scrollIdx = xaml.IndexOf("TestCenterScrollViewer", StringComparison.Ordinal);
+        int categoryTabsIdx = xaml.IndexOf("TestCenterCategoryTabs", StringComparison.Ordinal);
         int openVpnTabIdx = xaml.IndexOf("Header=\"OpenVPN\"", StringComparison.Ordinal);
         int logBoxIdx = xaml.IndexOf("x:Name=\"LogBox\"", StringComparison.Ordinal);
-        Assert.True(scrollIdx >= 0 && openVpnTabIdx > scrollIdx && logBoxIdx > openVpnTabIdx);
+        Assert.True(categoryTabsIdx >= 0 && openVpnTabIdx > categoryTabsIdx && logBoxIdx > openVpnTabIdx);
+        string testCenterRegion = xaml.Substring(categoryTabsIdx, openVpnTabIdx - categoryTabsIdx);
+        Assert.DoesNotContain("x:Name=\"LogBox\"", testCenterRegion, StringComparison.Ordinal);
     }
 
     [Fact]
