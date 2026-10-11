@@ -39,7 +39,7 @@ powershell -ExecutionPolicy Bypass -File scripts\generate-app-icon.ps1
 - `vpn-route-tray-active.ico`
 - `vpn-route-tray-error.ico`
 
-Built from the tight preview PNG plus a small status indicator. Copied to app output under `tray/` at build/publish time.
+Built from the tight preview PNG (`vpn-route-icon-source.png` via `generate-app-icon.ps1`): canonical logo foreground is preserved, the squircle **background fill** is recolored per state (blue / green / red) for 16×16 readability, with an optional small corner dot as a secondary cue. Copied to app output under `tray/` at build/publish time.
 
 ## Future
 
