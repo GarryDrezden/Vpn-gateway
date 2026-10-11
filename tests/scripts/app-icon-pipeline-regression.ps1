@@ -196,6 +196,8 @@ try {
     $sidecar = Join-Path $staging 'vpn-route-icon.ico'
     if (-not (Test-Path -LiteralPath $appExe)) { throw 'Published App exe missing' }
     if (-not (Test-Path -LiteralPath $sidecar)) { throw 'Published sidecar vpn-route-icon.ico missing' }
+    $trayReady = Join-Path $staging 'tray\vpn-route-tray-ready.ico'
+    if (-not (Test-Path -LiteralPath $trayReady)) { throw 'Published tray ready icon missing' }
 }
 finally {
     Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue

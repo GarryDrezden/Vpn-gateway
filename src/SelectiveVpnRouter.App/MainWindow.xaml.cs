@@ -11,11 +11,13 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
+using SelectiveVpnRouter.App.Tray;
 using SelectiveVpnRouter.Core;
 using SelectiveVpnRouter.Core.ApplicationDiscovery;
 using SelectiveVpnRouter.Core.BrowserRouting;
 using SelectiveVpnRouter.Core.Portable;
 using SelectiveVpnRouter.Core.RoutingTrace;
+using SelectiveVpnRouter.Core.Tray;
 using Forms = System.Windows.Forms;
 using MessageBox = System.Windows.MessageBox;
 using Window = System.Windows.Window;
@@ -45,10 +47,11 @@ public partial class MainWindow : Window
     private readonly List<string> _resolvedTargetAddresses = [];
     private int _targetPort = 443;
     private IReadOnlyList<TempAppVpnFlowDto> _lastRealAppFlowDtos = [];
-    private readonly Forms.NotifyIcon _tray = new();
+    private readonly AppTrayController _trayController;
     private readonly PeriodicTimer _timer = new(TimeSpan.FromSeconds(2));
     private CancellationTokenSource _cts = new();
     private bool _exit;
+    private bool _serviceUnavailable;
     private bool _connectUiActive;
     private bool _workConnectPollActive;
     private bool _bootstrapGateActive;
@@ -101,25 +104,57 @@ public partial class MainWindow : Window
         FlowFilterMixed.Click += OnFlowFilterChanged;
         FlowFilterErrors.Click += OnFlowFilterChanged;
         AppSearchBox.TextChanged += (_, _) => RefreshAppsFilter();
-        _tray.Text = AppBranding.ProductName;
-        _tray.Visible = true;
         Icon = AppIconHelper.WpfIcon;
-        _tray.Icon = AppIconHelper.CloneTrayIcon();
-        _tray.DoubleClick += (_, _) => { Show(); WindowState = WindowState.Normal; Activate(); };
-        _tray.ContextMenuStrip = BuildTray();
+        _trayController = new AppTrayController(new AppTrayController.HostActions
+        {
+            OpenMainWindow = ShowMainWindowFromTray,
+            ConnectVpnAsync = ConnectVpnAsync,
+            DisconnectVpnAsync = () => Call(IpcMethods.DisconnectVpn),
+            OpenSettings = OpenSettingsFromTray,
+            ExitApplication = ExitFromTray,
+        });
+        _trayController.EnsureInitialized();
+        StateChanged += OnMainWindowStateChanged;
         Loaded += async (_, _) => await StartAsync();
     }
 
-    private Forms.ContextMenuStrip BuildTray()
+    internal void NavigateToSettings()
     {
-        var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Открыть", null, (_, _) => { Show(); Activate(); });
-        menu.Items.Add("Подключить VPN", null, async (_, _) => await ConnectVpnAsync());
-        menu.Items.Add("Отключить VPN", null, async (_, _) => await Call(IpcMethods.DisconnectVpn));
-        menu.Items.Add("Приостановить маршрутизацию", null, async (_, _) => await Call(IpcMethods.PauseRouting));
-        menu.Items.Add("Аварийное восстановление", null, async (_, _) => await Call(IpcMethods.EmergencyRestore));
-        menu.Items.Add("Выход", null, (_, _) => { _exit = true; _tray.Visible = false; System.Windows.Application.Current.Shutdown(); });
-        return menu;
+        MainTabs.SelectedItem = SettingsTab;
+    }
+
+    private void ShowMainWindowFromTray()
+    {
+        if (TrayHostWindowPolicy.ShouldRestoreToNormal(!IsVisible, WindowState == WindowState.Minimized))
+        {
+            Show();
+            WindowState = WindowState.Normal;
+        }
+
+        Activate();
+    }
+
+    private void OpenSettingsFromTray()
+    {
+        ShowMainWindowFromTray();
+        NavigateToSettings();
+    }
+
+    private void OnMainWindowStateChanged(object? sender, EventArgs e)
+    {
+        if (!TrayHostWindowPolicy.ShouldHideToTrayWhenMinimized(WindowState == WindowState.Minimized, _exit))
+        {
+            return;
+        }
+
+        Hide();
+    }
+
+    private void ExitFromTray()
+    {
+        _exit = true;
+        _trayController.Dispose();
+        System.Windows.Application.Current.Shutdown();
     }
 
     private async Task StartAsync()
@@ -255,6 +290,7 @@ public partial class MainWindow : Window
             if (snap is null)
             {
                 SetServiceUnavailable(true);
+                UpdateTrayPresentation(null);
                 return;
             }
 
@@ -269,14 +305,25 @@ public partial class MainWindow : Window
                 FlowPresentationHelper.SelectUserFlows(snap.Flows).Select(f => new ConnectionFlowRow(f)));
             RefreshConnectionsBoard(snap);
             LogBox.Text = string.Join(Environment.NewLine, snap.Vpn.RecentLog);
-            _tray.Text = vpnConnected ? AppBranding.ProductName + " — подключён" : AppBranding.ProductName + " — отключён";
+            UpdateTrayPresentation(snap);
             await RefreshTempRealAppStatusAsync();
             await ReconcileRoutingTraceAsync(pollEvents: _routingTracePhase == RoutingTraceUiPhase.Active);
         }
         catch (Exception)
         {
             SetServiceUnavailable(true);
+            UpdateTrayPresentation(null);
         }
+    }
+
+    private void UpdateTrayPresentation(ServiceSnapshot? snap)
+    {
+        bool connectInProgress = _connectUiActive || (snap is not null && !snap.VpnRoutingReady && snap.Vpn.Running);
+        TrayStatusPresentation presentation = TrayStatusMapper.Map(
+            snap,
+            serviceAvailable: !_serviceUnavailable && snap is not null,
+            connectUiInProgress: connectInProgress);
+        _trayController.Apply(presentation);
     }
 
     private void ApplyWorkVpnFeatureVisibility()
@@ -293,6 +340,7 @@ public partial class MainWindow : Window
 
     private void SetServiceUnavailable(bool unavailable)
     {
+        _serviceUnavailable = unavailable;
         ServiceBanner.Visibility = unavailable ? Visibility.Visible : Visibility.Collapsed;
         if (!unavailable) { return; }
         ServiceBannerText.Text = "Служба VPN Route недоступна.";
@@ -2015,9 +2063,7 @@ public partial class MainWindow : Window
         _connectUiActive = busy;
         ConnectVpnButton.IsEnabled = !busy;
         DisconnectVpnButton.IsEnabled = !busy;
-        if (busy)
-        {
-        }
+        UpdateTrayPresentation(_lastSnapshot);
     }
 
     private void OnClosing(object sender, CancelEventArgs e)
@@ -2025,8 +2071,7 @@ public partial class MainWindow : Window
         if (_exit)
         {
             _cts.Cancel();
-            _tray.Visible = false;
-            _tray.Dispose();
+            _trayController.Dispose();
             return;
         }
 

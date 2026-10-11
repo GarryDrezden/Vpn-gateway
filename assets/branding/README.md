@@ -31,6 +31,16 @@ Publish/update/install may copy the generated ICO into live publish directories 
 powershell -ExecutionPolicy Bypass -File scripts\generate-app-icon.ps1
 ```
 
-## Future (not Phase 0)
+## Tray status icons (generated)
 
-Extension toolbar icons and tray status variants will get their own pipeline in later design prompts; they are not part of the Windows app ICO generator yet.
+`scripts/generate-tray-icons.ps1` writes 16×16 status variants to **`artifacts/branding/tray/`**:
+
+- `vpn-route-tray-ready.ico`
+- `vpn-route-tray-active.ico`
+- `vpn-route-tray-error.ico`
+
+Built from the tight preview PNG plus a small status indicator. Copied to app output under `tray/` at build/publish time.
+
+## Future
+
+Extension toolbar icons will get a separate pipeline in a later design prompt.

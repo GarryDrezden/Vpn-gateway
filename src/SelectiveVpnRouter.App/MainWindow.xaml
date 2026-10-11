@@ -1185,7 +1185,7 @@
         </TabControl>
       </TabItem>
       <!-- SETTINGS -->
-      <TabItem Header="Настройки">
+      <TabItem x:Name="SettingsTab" Header="Настройки">
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
           <Grid Margin="16">
             <Grid.RowDefinitions>

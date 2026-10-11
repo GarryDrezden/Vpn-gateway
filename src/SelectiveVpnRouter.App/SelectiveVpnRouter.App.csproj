@@ -9,6 +9,7 @@
     <_BrandingRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))</_BrandingRepoRoot>
     <_AppIconSource>$(_BrandingRepoRoot)\assets\branding\vpn-route-icon-source.png</_AppIconSource>
     <_GeneratedAppIcon>$(_BrandingRepoRoot)\artifacts\branding\vpn-route-icon.ico</_GeneratedAppIcon>
+    <_GeneratedTrayDir>$(_BrandingRepoRoot)\artifacts\branding\tray</_GeneratedTrayDir>
     <_LinkedAppIconPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\$(TargetFramework)\vpn-route-icon.ico</_LinkedAppIconPath>
     <ApplicationIcon>$(_LinkedAppIconPath)</ApplicationIcon>
   </PropertyGroup>
@@ -17,7 +18,22 @@
   </ItemGroup>
   <Target Name="EnsureAppIconGenerated" BeforeTargets="PrepareForBuild;PrepareForPublish">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(_BrandingRepoRoot)\scripts\generate-app-icon.ps1&quot; -SourcePng &quot;$(_AppIconSource)&quot; -OutputIco &quot;$(_GeneratedAppIcon)&quot; -SkipIfUpToDate -Quiet" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(_BrandingRepoRoot)\scripts\generate-tray-icons.ps1&quot; -SkipIfUpToDate -Quiet" />
     <Copy SourceFiles="$(_GeneratedAppIcon)" DestinationFiles="$(_LinkedAppIconPath)" SkipUnchangedFiles="true" />
+    <ItemGroup Condition="Exists('$(_GeneratedTrayDir)\vpn-route-tray-ready.ico')">
+      <Content Include="$(_GeneratedTrayDir)\vpn-route-tray-ready.ico">
+        <Link>tray\vpn-route-tray-ready.ico</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+      <Content Include="$(_GeneratedTrayDir)\vpn-route-tray-active.ico">
+        <Link>tray\vpn-route-tray-active.ico</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+      <Content Include="$(_GeneratedTrayDir)\vpn-route-tray-error.ico">
+        <Link>tray\vpn-route-tray-error.ico</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+    </ItemGroup>
     <ItemGroup>
       <Content Remove="vpn-route-icon.ico" />
       <Resource Remove="vpn-route-icon.ico" />
