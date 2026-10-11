@@ -28,7 +28,7 @@ VPN Route позволяет направлять через VPN только в
 
 Контролируемый путь **Probe.exe**: прозрачная TCP-маршрутизация по процессам с одновременной изоляцией Direct-трафика.
 
-Правило приложения → WFP `FWPM_CONDITION_ALE_APP_ID` → `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4` → callout KMDF (`SelectiveVpnCallout.sys`) → прозрачный прокси на localhost → восстановление redirect context → исходящий сокет, привязанный к VPN.
+Правило приложения → WFP `FWPM_CONDITION_ALE_APP_ID` → `FWPM_LAYER_ALE_CONNECT_REDIRECT_V4` → callout KMDF (`SelectiveVpnCallout.sys`) → прозрачный прокси на localhost → восстановление контекста перенаправления → исходящий сокет, привязанный к VPN.
 
 ### Веха 2 — `real-app-vpn-egress-pass-v1`
 
@@ -88,7 +88,7 @@ UX правил приложений, обнаружение MSIX, стабил�
 - **Привязка packaged-приложений:** `PackagedBinding` в правилах (PFN + ApplicationId + SID пользователя); перепривязка при load/save/обновлении политики; связанные helper из манифеста делят VPN WFP-фильтры с одной логической строкой UI (например ChatGPT).
 - **Loopback:** для каждой VPN-цели приложения — высокоприоритетный TCP PERMIT `127.0.0.0/8` на `ALE_CONNECT_REDIRECT_V4` до redirect callout; `FWP_ACTION_PERMIT = 0x00001002`; Test Center **OAuth localhost** — ПРОЙДЕНО.
 - **Диагностика:** категории Test Center, закреплённая панель результата, перенос строк в журнале, UTF-8 вывод probe/service, диагностика **целей маршрутизации packaged-приложений**.
-- **Разработка:** сборка драйвера в изолированный staging; канонический runtime-драйвер в layout публикации; скрипты развёртывания/отката (см. `scripts`).
+- **Разработка:** сборка драйвера в изолированную промежуточную папку; канонический рабочий драйвер в структуре публикации; скрипты развёртывания/отката (см. `scripts`).
 
 Известное ограничение: OAuth **token exchange** ChatGPT/Codex может по-прежнему возвращать region 403 при выборочной маршрутизации, несмотря на покрытие primary/helper WFP — см. [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
 
@@ -96,9 +96,9 @@ UX правил приложений, обнаружение MSIX, стабил�
 
 ### Подтверждено сейчас (TCP IPv4)
 
-- Connect-redirect по процессам для выбранных `.exe` (ASCII и Unicode пути)
+- Connect-redirect (WFP) по процессам для выбранных `.exe` (ASCII и Unicode пути)
 - Изоляция Probe + исходящий трафик curl реального приложения + исходящий Chrome + Telegram (Unicode путь)
-- WFP ALE APP_ID, redirect callout, прокси, redirect context, исходящий через VPN
+- WFP ALE APP_ID, callout перенаправления, прокси, контекст перенаправления, исходящий через VPN
 - История потоков реального приложения с сопоставлением цели (фоновые потоки не дают ложный успех цели)
 
 ### Ещё не подтверждено (не предполагайте поддержку)
@@ -110,7 +110,7 @@ UX правил приложений, обнаружение MSIX, стабил�
 
 ### В работе — portable-поставка / bootstrap V1
 
-Для конечного пользователя — **самодостаточный ZIP win-x64** (без отдельной установки .NET 10 Runtime). Служба Windows **+ драйвер WFP** регистрируются один раз через повышенный `SelectiveVpnRouter.Bootstrap.exe`; после состояния bootstrap **Ready** приложение запускается без elevation.
+Для конечного пользователя — **самодостаточный ZIP win-x64** (без отдельной установки .NET 10 Runtime). Служба Windows **+ драйвер WFP** регистрируются один раз через повышенный `SelectiveVpnRouter.Bootstrap.exe`; после состояния bootstrap **Ready** приложение запускается без повышения прав.
 
 Полное руководство: [docs/portable-distribution.md](docs/portable-distribution.md)
 
@@ -135,7 +135,7 @@ UX правил приложений, обнаружение MSIX, стабил�
 
 **Удаление системных компонентов (конфиг сохраняется):** повышенный `SelectiveVpnRouter.Bootstrap.exe remove --root "<portable dir>"` — сохраняет `%ProgramData%\SelectiveVpnRouter\config.json` и `%LocalAppData%\SelectiveVpnRouter\ui.json`.
 
-Развёртывание для разработки (publish с framework-dependent) по-прежнему: `scripts\update-desktop.ps1` → `artifacts\publish`.
+Развёртывание для разработки (публикация с framework-dependent) по-прежнему: `scripts\update-desktop.ps1` → `artifacts\publish`.
 
 
 ## Установка/обновление для разработчика (VPN Route + расширение браузера)
@@ -163,11 +163,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\install-vpn-route.ps1 -CheckO
 - `-CheckOnly` — только статус; см. команду выше
 - `-VerboseOutput` — строки «ПРОЙДЕНО» в консоли (полная детализация в `artifacts/logs/install-vpn-route-*.log`)
 
-**Перед полной установкой/обновлением:** закройте **SelectiveVpnRouter.App** (GUI). Оркестратор предупреждает, если приложение открыто; `update-desktop.ps1` останавливает runtime VPN Route на время publish.
+**Перед полной установкой/обновлением:** закройте **SelectiveVpnRouter.App** (GUI). Оркестратор предупреждает, если приложение открыто; `update-desktop.ps1` останавливает runtime VPN Route на время публикации.
 
 Установщик **не** перезагружает расширение Chromium/Yandex. После успеха перезагрузите на `browser://extensions` или загрузите распакованное расширение из напечатанной папки `dist\extension` (штатный ID `lfaekfalhkgmbfdjjlfcalanhijeaien`).
 
-Проверка после установки — **только чтение** (ping Native Host + integration manifest); RPC записи правил не вызываются.
+Проверка после установки — **только чтение** (ping Native Host + манифест интеграции); RPC записи правил не вызываются.
 
 Сбои **до** первого запуска `update-desktop.ps1` выводят сообщения `INSTALL FAILED BEFORE UPDATE` / `No live changes were made.` Сбои после публикации Service — `Partial update...`.
 
@@ -185,7 +185,7 @@ Yandex Browser использует ключ реестра Native Messaging **C
 .\scripts\update-desktop.ps1
 ```
 
-Выполняет **сборку → тесты → публикацию → перезапуск службы → дымовой прогон runtime**. Лог: `artifacts/logs/update-desktop-*.log`.
+Выполняет **сборку → тесты → публикацию → перезапуск службы → дымовой прогон среды выполнения**. Лог: `artifacts/logs/update-desktop-*.log`.
 
 Подробный вывод: `.\scripts\update-desktop.ps1 -VerboseOutput`
 
@@ -193,11 +193,11 @@ Yandex Browser использует ключ реестра Native Messaging **C
 
 | Компонент | Роль |
 | --- | --- |
-| `SelectiveVpnRouter.App` | WPF GUI без повышения прав, tray, Test Center |
-| `SelectiveVpnRouter.Service` | Повышенный backend-сервис (служба Windows или `--console`) |
+| `SelectiveVpnRouter.App` | WPF GUI без повышения прав, значок в трее, Test Center |
+| `SelectiveVpnRouter.Service` | Привилегированная служба (Windows Service или `--console`) |
 | `SelectiveVpnRouter.Probe` | Автономная проверка маршрута |
-| `SelectiveVpn.V0` | Ранний transport PoC (сохранён; не удалять) |
-| `driver/SelectiveVpnCallout` | Минимальный KMDF WFP connect-redirect callout (нужен для *прозрачного* TCP по процессам) |
+| `SelectiveVpn.V0` | Ранний прототип транспорта (PoC; сохранён; не удалять) |
+| `driver/SelectiveVpnCallout` | Минимальный KMDF WFP callout connect-redirect (нужен для *прозрачного* TCP по процессам) |
 
 Постоянный конфиг: `%ProgramData%\SelectiveVpnRouter\config.json`
 Настройки UI: `%LocalAppData%\SelectiveVpnRouter\`
@@ -213,13 +213,13 @@ dotnet build SelectiveVpnRouter.sln -c Release
 dotnet test SelectiveVpnRouter.sln -c Release
 ```
 
-3. Для обычного desktop-сценария см. **[Запуск desktop](docs/DESKTOP_LAUNCH.md)** — один раз publish, один раз установить службу Windows, затем двойной щелчок по `SelectiveVpnRouter.App.exe`.
+3. Для обычного сценария настольного приложения см. **[Запуск desktop](docs/DESKTOP_LAUNCH.md)** — один раз публикация, один раз установить службу Windows, затем двойной щелчок по `SelectiveVpnRouter.App.exe`.
 
-   Режим dev console (с elevation): `SelectiveVpnRouter.Service.exe --console`
+   Консольный режим разработки (с повышением прав): `SelectiveVpnRouter.Service.exe --console`
 
    Или установка службы: `powershell -ExecutionPolicy Bypass -File scripts\publish-desktop.ps1`, затем `scripts\install-service.ps1`
 
-4. Запустите `SelectiveVpnRouter.App.exe` (elevation не требуется).
+4. Запустите `SelectiveVpnRouter.App.exe` (повышение прав не требуется).
 5. Мастер настройки: выберите `openvpn.exe`, ваш `.ovpn`, при необходимости **режим совместимости (отключить DCO)**, если DCO конфликтует с другим VPN-драйвером.
 6. Подключитесь. Личный туннель запускается с `--route-nopull`, чтобы **не** заменять системный маршрут по умолчанию.
 7. Добавьте правила:
@@ -233,7 +233,7 @@ dotnet test SelectiveVpnRouter.sln -c Release
 
 Вторая копия Probe **без** VPN-правила приложения должна оставаться Direct.
 
-**Прозрачный** TCP `Cursor.exe` → VPN требует callout-драйвер WFP (см. [docs/DRIVER_SETUP.md](docs/DRIVER_SETUP.md)). Пока драйвер не загружен, Test Center сообщает об этом честно; `Probe --via-proxy 127.0.0.1:<proxyPort>` по-прежнему доказывает путь через прокси, привязанный к VPN.
+**Прозрачный** TCP `Cursor.exe` → VPN требует callout-драйвер WFP (см. [docs/DRIVER_SETUP.md](docs/DRIVER_SETUP.md)). Пока драйвер не загружен, Test Center сообщает об этом честно; `Probe --via-proxy 127.0.0.1:<proxyPort>` по-прежнему доказывает путь через прокси, привязанный к VPN-сессии.
 
 ## Режимы маршрутизации (как есть)
 
@@ -242,11 +242,11 @@ dotnet test SelectiveVpnRouter.sln -c Release
 
 ## Открытый отказ (fail-open)
 
-Если GUI, служба, OpenVPN или политика драйвера пропадают, Direct-интернет должен продолжать работать. **EMERGENCY RESTORE** снимает только маршруты, фильтры WFP и управляемый OpenVPN *этого приложения*.
+Если GUI, служба, OpenVPN или политика драйвера пропадают, интернет в режиме Direct должен продолжать работать. **EMERGENCY RESTORE** снимает только маршруты, фильтры WFP и управляемый OpenVPN *этого приложения*.
 
 ## Browser Routing 1.0.0 RC19
 
-VPN Route Service отдаёт авторитетное состояние Browser Routing через IPC pipe только для чтения; в **1.0.0 RC19** добавлен push events pipe (`SelectiveVpnRouter.BrowserRouting.Events`), чтобы расширение Chromium синхронизировалось после зафиксированных изменений правил, с периодическим опросом `alarm` как запасной вариант. Настольное приложение остаётся основным редактором правил; расширение не поднимает VPN и применяет PAC из состояния Service через явный локальный SOCKS5.
+VPN Route Service отдаёт авторитетное состояние Browser Routing через IPC-канал только для чтения; в **1.0.0 RC19** добавлен канал push-событий (`SelectiveVpnRouter.BrowserRouting.Events`), чтобы расширение Chromium синхронизировалось после зафиксированных изменений правил, с периодическим опросом `alarm` как запасной вариант. Настольное приложение остаётся основным редактором правил; расширение не поднимает VPN и применяет PAC из состояния Service через явный локальный SOCKS5.
 
 ## Документация
 
@@ -259,5 +259,5 @@ VPN Route Service отдаёт авторитетное состояние Brows
 - [Устранение неполадок](docs/TROUBLESHOOTING.md)
 - [Безопасность](docs/SECURITY.md)
 - [Известные ограничения](docs/KNOWN_LIMITATIONS.md)
-- [Transport PoC V0](docs/V0.md)
+- [Прототип транспорта PoC V0](docs/V0.md)
 - [Как запустить V0](docs/HOW_TO_RUN.md)
