@@ -1,5 +1,11 @@
 # VPN Route
 
+**VPN Route — выборочная маршрутизация приложений и сайтов через VPN в Windows.**
+
+VPN Route позволяет направлять через VPN только выбранные приложения и сайты, оставляя остальной трафик Windows на обычном подключении. Приложение управляет VPN-соединением, маршрутизацией приложений, браузерными правилами и диагностикой системы.
+
+---
+
 Windows 10/11 x64 app that keeps **normal Direct internet** as the system default, can coexist with a **corporate VPN**, and sends **only selected applications** (and optionally selected destinations) through a **personal OpenVPN** tunnel.
 
 Quick scenario: **route Cursor through personal VPN while Git stays Direct.**
