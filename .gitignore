@@ -33,6 +33,9 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
+## Local design/reference packs (not product source)
+/upload/
+
 ## Local diagnostic output from V0 runs
 reports/
 *.diag.txt
