@@ -11,8 +11,10 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
+using SelectiveVpnRouter.App.Startup;
 using SelectiveVpnRouter.App.Tray;
 using SelectiveVpnRouter.Core;
+using SelectiveVpnRouter.Core.Startup;
 using SelectiveVpnRouter.Core.ApplicationDiscovery;
 using SelectiveVpnRouter.Core.BrowserRouting;
 using SelectiveVpnRouter.Core.Portable;
@@ -57,6 +59,12 @@ public partial class MainWindow : Window
     private bool _bootstrapGateActive;
     private bool _refreshLoopStarted;
     private AppConfiguration _config = new();
+    private UiSettings _uiSettings = new();
+    private ApplicationLaunchContext _launch = ApplicationLaunchContext.Parse(Array.Empty<string>());
+    private bool _startupPipelineStarted;
+    private bool _startupAutoConnectAttempted;
+    private bool _startupAutostartReconcileAttempted;
+    private readonly IWindowsStartupRunKey _startupRunKey = new WindowsStartupRunKey();
     private readonly ApplicationDiscoveryCoordinator _appDiscovery = new();
     private bool _installedDiscoveryLoaded;
     private string _lastDiagRaw = string.Empty;
@@ -113,15 +121,65 @@ public partial class MainWindow : Window
             OpenSettings = OpenSettingsFromTray,
             ExitApplication = ExitFromTray,
         });
-        _trayController.EnsureInitialized();
+        if (!LayoutDebugOptions.Enabled)
+        {
+            _trayController.EnsureInitialized();
+        }
+
         StateChanged += OnMainWindowStateChanged;
-        Loaded += async (_, _) => await StartAsync();
+        Loaded += async (_, _) =>
+        {
+            if (_startupPipelineStarted)
+            {
+                return;
+            }
+
+            _startupPipelineStarted = true;
+            await StartAsync();
+        };
+    }
+
+    internal void ConfigureLaunch(ApplicationLaunchContext launch, UiSettings uiSettings)
+    {
+        _launch = launch;
+        _uiSettings = uiSettings;
+    }
+
+    internal void BeginHiddenStartup()
+    {
+        ShowInTaskbar = false;
+        Visibility = Visibility.Hidden;
+    }
+
+    internal async Task RunInitialStartupAsync()
+    {
+        if (_startupPipelineStarted)
+        {
+            return;
+        }
+
+        _startupPipelineStarted = true;
+        await StartAsync();
+    }
+
+    private void EnsureMainWindowVisibleForUserAction()
+    {
+        if (Visibility == Visibility.Visible && ShowInTaskbar)
+        {
+            return;
+        }
+
+        ShowInTaskbar = true;
+        Show();
+        Activate();
     }
 
     internal void NavigateToSettings()
     {
         MainTabs.SelectedItem = SettingsTab;
     }
+
+    internal void ActivateFromSecondInstance() => ShowMainWindowFromTray();
 
     private void ShowMainWindowFromTray()
     {
@@ -131,6 +189,7 @@ public partial class MainWindow : Window
             WindowState = WindowState.Normal;
         }
 
+        ShowInTaskbar = true;
         Activate();
     }
 
@@ -142,6 +201,11 @@ public partial class MainWindow : Window
 
     private void OnMainWindowStateChanged(object? sender, EventArgs e)
     {
+        if (LayoutDebugOptions.Enabled)
+        {
+            return;
+        }
+
         if (!TrayHostWindowPolicy.ShouldHideToTrayWhenMinimized(WindowState == WindowState.Minimized, _exit))
         {
             return;
@@ -160,6 +224,12 @@ public partial class MainWindow : Window
     private async Task StartAsync()
     {
         ProductVersionText.Text = AppBranding.ProductName + " " + AppBranding.DisplayVersion;
+        if (LayoutDebugOptions.Enabled)
+        {
+            await StartLayoutDebugPreviewAsync();
+            return;
+        }
+
         if (!await EnsurePortableBootstrapReadyAsync())
         {
             return;
@@ -168,10 +238,28 @@ public partial class MainWindow : Window
         await ContinueStartupAsync();
     }
 
+    private async Task StartLayoutDebugPreviewAsync()
+    {
+        BootstrapOverlay.Visibility = Visibility.Collapsed;
+        (_config, _uiSettings) = LayoutDebugPreviewStartup.LoadReadOnlyPreviewState();
+        ApplyConfigToUi(_config);
+        ApplyUiSettingsToUi(_uiSettings);
+        NavigateToSettings();
+        await Task.CompletedTask;
+    }
+
     private async Task ContinueStartupAsync()
     {
         _config = await LoadConfigFromServiceOrDiskAsync();
+        if (!UiSettingsStore.Exists())
+        {
+            UiSettingsStore.EnsureInitialFileFromLegacyServiceUi(_config.Ui);
+        }
+
+        _uiSettings = UiSettingsStore.LoadOrDefault();
         ApplyConfigToUi(_config);
+        ApplyUiSettingsToUi(_uiSettings);
+        TryReconcileAutostartRegistrationOnce();
         if (!_refreshLoopStarted)
         {
             _refreshLoopStarted = true;
@@ -179,6 +267,7 @@ public partial class MainWindow : Window
         }
 
         await RefreshAsync(force: true);
+        await TryStartupAutoConnectAsync();
     }
 
     private async Task<bool> EnsurePortableBootstrapReadyAsync()
@@ -192,6 +281,7 @@ public partial class MainWindow : Window
         }
 
         _bootstrapGateActive = true;
+        EnsureMainWindowVisibleForUserAction();
         BootstrapOverlay.Visibility = Visibility.Visible;
         BootstrapOverlayMessage.Text = status.BootstrapState switch
         {
@@ -318,6 +408,11 @@ public partial class MainWindow : Window
 
     private void UpdateTrayPresentation(ServiceSnapshot? snap)
     {
+        if (LayoutDebugOptions.Enabled)
+        {
+            return;
+        }
+
         bool connectInProgress = _connectUiActive || (snap is not null && !snap.VpnRoutingReady && snap.Vpn.Running);
         TrayStatusPresentation presentation = TrayStatusMapper.Map(
             snap,
@@ -1267,6 +1362,12 @@ public partial class MainWindow : Window
 
     private async void OnSaveSetup(object sender, RoutedEventArgs e)
     {
+        if (LayoutDebugOptions.Enabled)
+        {
+            WizardHint.Text = LayoutDebugPreviewStartup.PreviewSaveBlockedMessage;
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(FirstAppBox.Text) && File.Exists(FirstAppBox.Text))
         {
             ApplicationRuleAddResult add = ApplicationRulesHelper.TryAddApplicationRule(_config, FirstAppBox.Text);
@@ -1279,6 +1380,16 @@ public partial class MainWindow : Window
         }
 
         await SaveConfigAsync();
+        UiSettings requested = ReadUiSettingsFromUi();
+        UiSettingsSaveResult saveResult = TrySaveUiSettingsAndAutostart(requested);
+        ApplyUiSettingsToUi(saveResult.PersistedSettings);
+        if (saveResult.AutostartWarning is not null)
+        {
+            WizardHint.Text = "Настройки сохранены, но автозапуск Windows не обновлён: " + saveResult.AutostartWarning;
+            MessageBox.Show(saveResult.AutostartWarning, AppBranding.ProductName, MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
         WizardHint.Text = "Настройки сохранены. Подключите VPN на главной вкладке.";
     }
 
@@ -1796,6 +1907,11 @@ public partial class MainWindow : Window
 
     private async Task SaveConfigAsync(AppConfiguration? config = null)
     {
+        if (LayoutDebugOptions.Enabled)
+        {
+            return;
+        }
+
         _config = config ?? ReadConfigFromUi();
         await _client.SendOkAsync<AppConfiguration>(IpcMethods.SetConfig, _config, _cts.Token);
         HomeAppsCountText.Text = ApplicationRulesHelper.CountVpnRoutedApplications(_appRules.Select(r => r.ToRule())).ToString();
@@ -1985,7 +2101,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ConnectVpnAsync()
+    private Task ConnectVpnAsync() => ConnectVpnInternalAsync(ConnectVpnPresentation.Interactive);
+
+    private async Task ConnectVpnInternalAsync(ConnectVpnPresentation presentation)
     {
         if (_connectUiActive)
         {
@@ -1993,7 +2111,7 @@ public partial class MainWindow : Window
         }
 
         SetConnectUiBusy(true);
-        LogConnectStage("connect-click");
+        LogConnectStage(presentation == ConnectVpnPresentation.StartupAutoConnect ? "connect-startup-auto" : "connect-click");
         ConnectVpnRequest request = BuildConnectVpnRequestFromUi();
         try
         {
@@ -2012,23 +2130,132 @@ public partial class MainWindow : Window
                 return;
             }
 
-            MessageBox.Show(IpcTimeoutException.ConnectVpnUserMessage, "Selective VPN Router");
+            if (presentation == ConnectVpnPresentation.Interactive)
+            {
+                MessageBox.Show(IpcTimeoutException.ConnectVpnUserMessage, "Selective VPN Router");
+            }
+            else
+            {
+                NotifyStartupAutoConnectFailure("Не удалось автоматически подключить VPN (таймаут).");
+            }
         }
         catch (InvalidOperationException ex) when (VpnTunnelNotReadyException.IsReadinessFailureMessage(ex.Message))
         {
             LogConnectStage("connect-response readiness-timeout");
             await RefreshAsync(force: true);
-            MessageBox.Show(ex.Message, "VPN adapter not ready");
+            if (presentation == ConnectVpnPresentation.Interactive)
+            {
+                MessageBox.Show(ex.Message, "VPN adapter not ready");
+            }
+            else
+            {
+                NotifyStartupAutoConnectFailure("Не удалось автоматически подключить VPN.");
+            }
         }
         catch (Exception ex)
         {
             LogConnectStage("connect-response error=" + ex.Message);
             await RefreshAsync(force: true);
-            MessageBox.Show(ex.Message, "Selective VPN Router");
+            if (presentation == ConnectVpnPresentation.Interactive)
+            {
+                MessageBox.Show(ex.Message, "Selective VPN Router");
+            }
+            else
+            {
+                NotifyStartupAutoConnectFailure("Не удалось автоматически подключить VPN.");
+            }
         }
         finally
         {
             SetConnectUiBusy(false);
+        }
+    }
+
+    private bool _startupAutoConnectFailureNotified;
+
+    private void NotifyStartupAutoConnectFailure(string message)
+    {
+        LogConnectStage("connect-startup-auto-failed " + message);
+        if (_startupAutoConnectFailureNotified)
+        {
+            return;
+        }
+
+        _startupAutoConnectFailureNotified = true;
+        _trayController.ShowBalloon(AppBranding.ProductName, message + " Откройте приложение для подробностей.");
+    }
+
+    private async Task TryStartupAutoConnectAsync()
+    {
+        if (!StartupAutoConnectPolicy.ShouldAttemptAutoConnect(
+                _uiSettings.AutoConnectVpnOnStartup,
+                _lastSnapshot?.VpnRoutingReady == true,
+                _connectUiActive,
+                _startupAutoConnectAttempted))
+        {
+            return;
+        }
+
+        _startupAutoConnectAttempted = true;
+        await ConnectVpnInternalAsync(ConnectVpnPresentation.StartupAutoConnect);
+    }
+
+    private void ApplyUiSettingsToUi(UiSettings ui)
+    {
+        StartWithWindowsBox.IsChecked = ui.StartWithWindows;
+        StartMinimizedBox.IsChecked = ui.StartMinimized;
+        AutoConnectVpnOnStartupBox.IsChecked = ui.AutoConnectVpnOnStartup;
+    }
+
+    private UiSettings ReadUiSettingsFromUi() =>
+        _uiSettings with
+        {
+            StartWithWindows = StartWithWindowsBox.IsChecked == true,
+            StartMinimized = StartMinimizedBox.IsChecked == true,
+            AutoConnectVpnOnStartup = AutoConnectVpnOnStartupBox.IsChecked == true,
+        };
+
+    private UiSettingsSaveResult TrySaveUiSettingsAndAutostart(UiSettings requestedFromUi)
+    {
+        string exe = Environment.ProcessPath
+            ?? Process.GetCurrentProcess().MainModule?.FileName
+            ?? throw new InvalidOperationException("Unable to resolve current executable path.");
+        UiSettingsSaveResult result = UiSettingsPersistence.SaveWithAutostartTransaction(
+            _uiSettings,
+            requestedFromUi,
+            _startupRunKey,
+            exe,
+            includeAutostartMarker: true);
+        _uiSettings = result.PersistedSettings;
+        return result;
+    }
+
+    private void TryReconcileAutostartRegistrationOnce()
+    {
+        if (_startupAutostartReconcileAttempted)
+        {
+            return;
+        }
+
+        _startupAutostartReconcileAttempted = true;
+        try
+        {
+            string exe = Environment.ProcessPath
+                ?? Process.GetCurrentProcess().MainModule?.FileName
+                ?? throw new InvalidOperationException("Unable to resolve current executable path.");
+            string? reconcileError = UiSettingsPersistence.TryReconcileAutostartRegistration(
+                _uiSettings,
+                _startupRunKey,
+                exe,
+                includeAutostartMarker: true);
+            if (reconcileError is not null)
+            {
+                LogConnectStage("autostart-reconcile-failed " + reconcileError);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogConnectStage("autostart-reconcile-failed " + ex.Message);
         }
     }
 
@@ -2068,6 +2295,14 @@ public partial class MainWindow : Window
 
     private void OnClosing(object sender, CancelEventArgs e)
     {
+        if (LayoutDebugOptions.Enabled)
+        {
+            _exit = true;
+            _cts.Cancel();
+            _trayController.Dispose();
+            return;
+        }
+
         if (_exit)
         {
             _cts.Cancel();

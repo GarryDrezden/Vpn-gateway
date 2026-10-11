@@ -226,7 +226,7 @@ public class ConnectVpnRegressionTests
     public void ConnectVpnAsync_does_not_save_config_before_connect()
     {
         string text = File.ReadAllText(MainWindowSourcePath());
-        int start = text.IndexOf("private async Task ConnectVpnAsync()", StringComparison.Ordinal);
+        int start = text.IndexOf("private async Task ConnectVpnInternalAsync(", StringComparison.Ordinal);
         Assert.True(start >= 0);
         int end = text.IndexOf("private async Task Call(", start, StringComparison.Ordinal);
         Assert.True(end > start);

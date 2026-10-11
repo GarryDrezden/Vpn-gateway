@@ -65,6 +65,20 @@ internal sealed class AppTrayController : IDisposable
         _disconnectItem.Enabled = presentation.DisconnectEnabled;
     }
 
+    public void ShowBalloon(string title, string message, ToolTipIcon icon = ToolTipIcon.Warning)
+    {
+        EnsureInitialized();
+        if (_disposed)
+        {
+            return;
+        }
+
+        _notifyIcon.BalloonTipTitle = title;
+        _notifyIcon.BalloonTipText = message;
+        _notifyIcon.BalloonTipIcon = icon;
+        _notifyIcon.ShowBalloonTip(3000);
+    }
+
     public void Dispose()
     {
         if (_disposed)

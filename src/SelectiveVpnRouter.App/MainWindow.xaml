@@ -1297,6 +1297,8 @@
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto"/>
               <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <Grid x:Name="SetupTopGrid" Grid.Row="0" Margin="0,0,0,16">
@@ -1334,9 +1336,6 @@
                   </ComboBox>
                   <CheckBox x:Name="QuicBox" Margin="0,12,0,0"
                             Content="Блокировать QUIC UDP/443 для VPN-приложений"/>
-                  <WrapPanel Margin="0,16,0,0">
-                    <Button Content="Сохранить настройки" Click="OnSaveSetup" Style="{StaticResource PrimaryButton}"/>
-                  </WrapPanel>
                 </StackPanel>
               </Border>
 
@@ -1357,12 +1356,30 @@
                   <TextBlock Text="Поведение" Style="{StaticResource SectionTitleText}" Margin="0,16,0,8"/>
                   <TextBlock TextWrapping="Wrap" Style="{StaticResource SecondaryText}" Margin="0,0,0,12"
                              Text="После сохранения настроек подключите VPN на главной вкладке. Приложения с правилами VPN начнут использовать туннель автоматически."/>
-                  <TextBlock x:Name="WizardHint" TextWrapping="Wrap" Style="{StaticResource SecondaryText}" Text=""/>
                 </StackPanel>
               </Border>
             </Grid>
 
-            <Grid Grid.Row="1">
+            <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,16">
+              <StackPanel>
+                <TextBlock Text="Запуск и поведение" Style="{StaticResource SectionTitleText}" Margin="0,0,0,8"/>
+                <CheckBox x:Name="StartWithWindowsBox"
+                          Content="Запускать VPN Route вместе с Windows"/>
+                <CheckBox x:Name="StartMinimizedBox" Margin="0,8,0,0"
+                          Content="Запускать свёрнутым в трей"/>
+                <CheckBox x:Name="AutoConnectVpnOnStartupBox" Margin="0,8,0,0"
+                          Content="Автоматически подключать VPN при запуске VPN Route"/>
+                <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" Style="{StaticResource SecondaryText}"
+                           Text="Автоподключение относится только к личному VPN, которым управляет VPN Route."/>
+              </StackPanel>
+            </Border>
+
+            <StackPanel Grid.Row="2" Margin="0,0,0,16">
+              <TextBlock x:Name="WizardHint" TextWrapping="Wrap" Style="{StaticResource SecondaryText}" Margin="0,0,0,8"/>
+              <Button Content="Сохранить настройки" Click="OnSaveSetup" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left"/>
+            </StackPanel>
+
+            <Grid Grid.Row="3">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="16"/>

@@ -80,8 +80,14 @@ public sealed record AppConfiguration
 
 public sealed record UiSettings
 {
+    /// <summary>Legacy tray preference kept for backward-compatible JSON; tray hide is product-default.</summary>
     public bool MinimizeToTray { get; init; } = true;
+
     public bool StartMinimized { get; init; }
+
+    public bool StartWithWindows { get; init; }
+
+    public bool AutoConnectVpnOnStartup { get; init; }
 }
 
 public sealed record OwnedRoute
