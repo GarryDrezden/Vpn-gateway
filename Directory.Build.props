@@ -10,8 +10,8 @@
     <Product>VPN Route</Product>
     <!-- Single source: public target 1.0.0, RC build identity via ReleaseRevision (not SemVer 1.0.14). -->
     <VpnRouteProductVersion>1.0.0</VpnRouteProductVersion>
-    <VpnRouteReleaseChannel>RC</VpnRouteReleaseChannel>
-    <VpnRouteReleaseRevision>19</VpnRouteReleaseRevision>
+    <VpnRouteReleaseChannel>stable</VpnRouteReleaseChannel>
+    <VpnRouteReleaseRevision>0</VpnRouteReleaseRevision>
     <Version>$(VpnRouteProductVersion)</Version>
     <AssemblyVersion>$(VpnRouteProductVersion).$(VpnRouteReleaseRevision)</AssemblyVersion>
     <FileVersion>$(VpnRouteProductVersion).$(VpnRouteReleaseRevision)</FileVersion>

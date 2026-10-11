@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.0 — First stable release
+
+First stable **VPN Route 1.0.0** identity (numeric/file **1.0.0.0**). Browser Routing API and Native Messaging protocol remain **v1**.
+
+**Product scope accepted in this release:**
+
+- Selective per-process TCP routing for chosen Windows applications through managed OpenVPN, with Direct coexistence and fail-open cleanup when the app stack is unavailable.
+- WFP connect-redirect callout and transparent localhost proxy path for application rules.
+- Application discovery (installed/running, packaged apps, helper routing targets) with documented limitations.
+- **Browser Routing v1** by domain: authoritative state in Service, Chromium extension companion UI, PAC + explicit loopback **SOCKS5**, VPN-side DNS for browser VPN routes, **fail-closed** PAC when egress is unavailable.
+- Desktop app as primary browser-rule editor; extension popup for quick control; **write API** and **push synchronization** for browser routing state.
+- Unified developer installer/update orchestration (gateway + extension + Native Host registration).
+- Redesigned desktop, tray, and extension UI; Windows autostart, start minimized to tray, startup managed-VPN auto-connect (independent settings), per-user single-instance activation.
+- Known limitations remain documented (no selective UDP/QUIC, no full IPv6 selective egress, no Work VPN production support, etc.).
+
+**Production browser acceptance:** manual acceptance on **Yandex Browser** for the current extension + Native Host + Service chain. Google Chrome had an early Phase 0A spike PASS; the current **1.0.0** production chain is not separately accepted in Chrome or Edge.
+
 ## Milestone — Routing Trace diagnostics (`routing-trace-pass-v1`)
 
 - **Routing Trace V1** in desktop app: single active session, last completed session, live grid, text/JSON export.

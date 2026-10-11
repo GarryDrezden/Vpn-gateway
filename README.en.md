@@ -14,13 +14,13 @@ Quick scenario: **route Cursor through personal VPN while Git stays Direct.**
 
 ## Product version
 
-**VPN Route 1.0.0 RC19** (numeric/file version **1.0.0.19**). Public stable **v1.0.0** is not shipped yet. Chromium extension production ID `lfaekfalhkgmbfdjjlfcalanhijeaien`, Native Host `com.vpnroute.browser`, Browser Routing protocol **v1**.
+**VPN Route 1.0.0** (numeric/file version **1.0.0.0**, first stable **v1.0.0**). Chromium extension production ID `lfaekfalhkgmbfdjjlfcalanhijeaien`, Native Host `com.vpnroute.browser`, Browser Routing protocol **v1**.
 
 ## Current test baseline
 
 On current `main` locally (`dotnet test SelectiveVpnRouter.sln -c Release`):
 
-- **925** tests total (**625** Core + **264** BrowserRouting + **36** Proxy)
+- **978** tests total (**678** Core + **264** BrowserRouting + **36** Proxy)
 
 ## Milestones (verified on Windows 10/11 x64)
 
@@ -243,9 +243,9 @@ A second copy of Probe **without** a VPN application rule should stay Direct.
 
 If the GUI, service, OpenVPN, or driver policy goes away, Direct internet must keep working. Use **EMERGENCY RESTORE** to drop only *this app's* routes, WFP filters, and managed OpenVPN.
 
-## Browser Routing 1.0.0 RC19
+## Browser Routing 1.0.0
 
-VPN Route Service exposes authoritative Browser Routing state over a read-only IPC pipe; **1.0.0 RC19** adds a push events pipe (`SelectiveVpnRouter.BrowserRouting.Events`) so the Chromium extension can sync after committed rule changes, with periodic `chrome.alarms` polling as fallback. Desktop remains the primary rule editor; the extension is not a VPN client and applies PAC from Service state via explicit local SOCKS5.
+VPN Route Service exposes authoritative Browser Routing state over IPC; the push events pipe (`SelectiveVpnRouter.BrowserRouting.Events`) lets the Chromium extension sync after committed rule changes, with periodic `chrome.alarms` polling as fallback. Desktop remains the primary rule editor; the extension is not a VPN client and applies PAC from Service state via explicit local SOCKS5 (fail-closed).
 
 ## Docs
 

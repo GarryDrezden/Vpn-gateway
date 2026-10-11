@@ -14,13 +14,13 @@ VPN Route позволяет направлять через VPN только в
 
 ## Версия продукта
 
-**VPN Route 1.0.0 RC19** (числовая/файловая версия **1.0.0.19**). Публичный стабильный релиз **v1.0.0** ещё не выпущен. Расширение Chromium: штатный ID `lfaekfalhkgmbfdjjlfcalanhijeaien`, Native Host `com.vpnroute.browser`, протокол Browser Routing **v1**.
+**VPN Route 1.0.0** (числовая/файловая версия **1.0.0.0**, первый стабильный **v1.0.0**). Расширение Chromium: штатный ID `lfaekfalhkgmbfdjjlfcalanhijeaien`, Native Host `com.vpnroute.browser`, протокол Browser Routing **v1**.
 
 ## Актуальная базовая линия тестов
 
 Локально на текущей `main` (`dotnet test SelectiveVpnRouter.sln -c Release`):
 
-- **925** тестов всего (**625** Core + **264** BrowserRouting + **36** Proxy)
+- **978** тестов всего (**678** Core + **264** BrowserRouting + **36** Proxy)
 
 ## Вехи (проверено на Windows 10/11 x64)
 
@@ -244,9 +244,9 @@ dotnet test SelectiveVpnRouter.sln -c Release
 
 Если GUI, служба, OpenVPN или политика драйвера пропадают, интернет в режиме Direct должен продолжать работать. **EMERGENCY RESTORE** снимает только маршруты, фильтры WFP и управляемый OpenVPN *этого приложения*.
 
-## Browser Routing 1.0.0 RC19
+## Browser Routing 1.0.0
 
-VPN Route Service отдаёт авторитетное состояние Browser Routing через IPC-канал только для чтения; в **1.0.0 RC19** добавлен канал push-событий (`SelectiveVpnRouter.BrowserRouting.Events`), чтобы расширение Chromium синхронизировалось после зафиксированных изменений правил, с периодическим опросом `alarm` как запасной вариант. Настольное приложение остаётся основным редактором правил; расширение не поднимает VPN и применяет PAC из состояния Service через явный локальный SOCKS5.
+VPN Route Service отдаёт авторитетное состояние Browser Routing через IPC; канал push-событий (`SelectiveVpnRouter.BrowserRouting.Events`) синхронизирует расширение Chromium после зафиксированных изменений правил, с периодическим опросом `alarm` как запасной вариант. Настольное приложение остаётся основным редактором правил; расширение не поднимает VPN и применяет PAC из состояния Service через явный локальный SOCKS5 (fail-closed).
 
 ## Документация
 

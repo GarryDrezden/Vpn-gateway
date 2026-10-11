@@ -596,8 +596,10 @@ Documentation updates (companion to this spec, separate repo):
 
 ---
 
-## 19. Next step
+## 19. Implementation status (historical resolution)
 
-Implementation plan: `docs/superpowers/plans/2026-10-05-browser-integration-port-v1-implementation-plan.md` (slices 0–8).
+The slice 0–8 **implementation plan** was completed during Browser Integration Port delivery and removed from the gateway repository during hygiene (obsolete execution checklist).
 
-No product code until that plan is approved. No commit/tag/push unless explicitly requested.
+**Shipped on current main:** Browser Integration Port v1 runtime (slices 0–8), App observability, extension consumer path, acceptance coverage; **Slice 9** mutable browser routing over IPC (write methods + push sync).
+
+**Source of truth for current behavior:** shipped product code and active integration/protocol documentation (`ext-vpn-route/docs/service-ipc-browser-routing-v1.md`, gateway browser-routing docs). This design spec remains the architectural narrative; §1.3–§1.4 and slice tables describe original milestone intent, not pending work.
